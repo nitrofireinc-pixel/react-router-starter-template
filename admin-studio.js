@@ -1,7 +1,7 @@
 /* Site Studio page editor: WYSIWYG canvas, palette drag, move/resize with
  * snap + no-overlap hints, inline text editing, undo/redo, draft autosave.
  * Autosave writes the DRAFT only. Nothing goes live until Publish is pressed.
- * Right-click text or an image and choose Add link. ← CMS returns to the staff menu.
+ * Right-click text or an image and choose Add link. Exit Builder returns to the staff menu.
  * The live studio page inlines this file. */
 (() => {
   const slug = document.body.dataset.slug;
@@ -817,7 +817,7 @@
     if ($('[data-exit-cms]')) return;
     const host = $('.st-top-right') || $('.st-tb-right');
     if (!host) return;
-    const a = el('a', { class: 'st-exit', href: '/admin', 'data-exit-cms': '', title: 'Back to the main CMS', text: '← CMS' });
+    const a = el('a', { class: 'st-exit st-pill st-exit-pill', href: '/admin', 'data-exit-cms': '', title: 'Back to the main CMS', text: 'Exit Builder' });
     host.prepend(a);
   }
   function ensureLinkUi() {
@@ -1288,7 +1288,7 @@
     const found = selected && findBlock(selected);
     if (!found) {
       host.append(el('h2', { text: 'Page settings' }), el('p', { class: 'st-selname', text: `${state?.page?.title || slug} · nothing selected` }));
-      host.append(el('p', { class: 'st-note', text: 'Click anything on the page to select it. Right-click it and choose Add link. Click selected words to type. Drag ⠿ Move to move a block and the blue corner to resize it. ← CMS (top right) goes back to the staff menu.' }));
+      host.append(el('p', { class: 'st-note', text: 'Click anything on the page to select it. Right-click it and choose Add link. Click selected words to type. Drag ⠿ Move to move a block and the blue corner to resize it. Exit Builder (top right) goes back to the staff menu.' }));
       host.append(el('div', { class: 'st-group', text: 'Page' }), kv('Address', el('b', { text: state?.page?.path || '' })), kv('Sections', el('b', { text: String(layout?.sections?.length || 0) })));
       host.append(el('div', { class: 'st-group', text: 'Who can edit' }), kv('Text', el('b', { text: `page:${slug}` })), kv('Layout', el('b', { text: `🔒 layout:${slug}` })));
       host.append(el('p', { class: 'st-note', text: `You can ${canLayout() ? 'change words and layout' : 'change words, links and pictures'} here.` }));

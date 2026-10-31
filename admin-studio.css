@@ -231,3 +231,11 @@ body.st-rc .st-rail-txt{writing-mode:vertical-rl}
   header .st-top-right,header .ev-top-right{width:340px;justify-content:flex-end;min-width:0;overflow:hidden}
   header.st-top a.st-exit,header.ev-top a.st-exit{position:absolute!important;top:14px!important;right:385px!important;left:auto!important;margin:0!important;padding:2px 0!important;border:0!important;font-family:"Work Sans",system-ui,sans-serif!important;font-size:13px!important;font-weight:400!important;letter-spacing:0!important;line-height:15px!important;height:19px!important;box-sizing:border-box!important;white-space:nowrap!important}
 }
+
+/* Studio "Exit Builder" pill (replaces the "← CMS" text link; Form Builder keeps its own). */
+a.st-exit.st-exit-pill{color:#fff;text-decoration:none;font-weight:600;display:inline-flex;align-items:center}
+a.st-exit.st-exit-pill::before{content:none!important}
+a.st-exit.st-exit-pill:hover,a.st-exit.st-exit-pill:focus-visible{background:rgba(255,255,255,.26)}
+@media (min-width:768px){
+  header.st-top a.st-exit.st-exit-pill,header.ev-top a.st-exit.st-exit-pill{top:8px!important;padding:4px 12px!important;border:1px solid rgba(255,255,255,.25)!important;border-radius:999px!important;height:auto!important;line-height:18px!important;font-size:12px!important;font-weight:600!important}
+}

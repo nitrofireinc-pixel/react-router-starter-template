@@ -611,7 +611,7 @@ const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-export const ASSET_VERSION = 'cms-p2-20261031zj';
+export const ASSET_VERSION = 'cms-p2-20261031zk';
 // Admin-only assets (Studio home). Bumping this never changes public page bytes.
 export const ADMIN_HOME_VERSION = `${ASSET_VERSION}-home5`;
 /** Admin-only cache key for the 14c sidebar + launcher (public pages keep ASSET_VERSION). */
@@ -14876,7 +14876,7 @@ async function handleFormsBuilderPage(request, env) {
 <link rel="stylesheet" href="/admin-events.css?v=${ADMIN_NAV_VERSION}"><link rel="stylesheet" href="/admin-forms.css?v=${ASSET_VERSION}"><style>${FORM_STUDIO_CSS}</style><link rel="stylesheet" href="/admin-nav.css?v=${ADMIN_NAV_VERSION}"></head>
 <body class="ev-app fb-app sn-body" data-me="${Number(user.id)}" data-super="${isSuperAdmin(user) ? '1' : ''}" data-can-delete="${isSuperAdmin(user) || ['president', 'vice-president', 'director'].some((p) => hasPermission(user, p)) ? '1' : ''}">
 <header class="ev-top"><a class="ev-brand" href="/admin" title="Back to the staff menu"><img src="/assets/efhs-admin-mark.png?v=${ASSET_VERSION}" alt=""><span>Site Studio · Form Builder</span></a>
-<div class="ev-top-right"><a class="st-exit" href="/admin" data-exit-cms title="Back to the main CMS">← CMS</a><span class="ev-who">👤 ${escapeHtml(who)}</span><img class="ev-e" src="/assets/efhs-blue-regiment-mark.png?v=${ASSET_VERSION}" alt="East Forsyth Blue Regiment"></div></header>
+<div class="ev-top-right"><a class="st-exit st-pill st-exit-pill" href="/admin" data-exit-cms title="Back to the main CMS">Exit Builder</a><span class="ev-who">👤 ${escapeHtml(who)}</span><img class="ev-e" src="/assets/efhs-blue-regiment-mark.png?v=${ASSET_VERSION}" alt="East Forsyth Blue Regiment"></div></header>
 ${renderAdminNavFragment(nav)}
 <div class="ev-body">
 <main class="ev-main fb-main" id="fb-root" aria-label="Form Builder"><p class="ev-loading">Loading forms…</p></main></div>
