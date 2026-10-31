@@ -539,11 +539,14 @@ const decodeEntities = (t) => t.replace(/&lt;/g, '<').replace(/&gt;/g, '>').repl
  * Live data sources. A live block keeps its original slot markup; the public
  * renderer fills it from the source on every request, so it is never hand-edited.
  */
+/** Mirrors EVENT_CARD_CATEGORIES in home-redesign.mjs. */
+export const EVENT_CARD_CATEGORY_IDS = ['all', 'fundraiser', 'game', 'rehearsal', 'meeting', 'deadline', 'trip', 'other'];
 export const LIVE_SOURCES = {
   'next-fund': { label: 'Calendar (next fundraiser)', admin: '/admin?tab=caldev', limit: false },
   'featured-fund': { label: 'Calendar (next fundraiser)', admin: '/admin?tab=caldev', limit: false },
   'other-funds': { label: 'Calendar (upcoming fundraisers)', admin: '/admin?tab=caldev', limit: true },
   events: { label: 'Calendar', admin: '/admin?tab=caldev', limit: true },
+  'event-cards': { label: 'Calendar (event cards)', admin: '/admin?tab=caldev', limit: true, category: true, manage: 'Edit events in the Calendar' },
   'sponsor-tiers': { label: 'Become a Sponsor page', admin: '/admin/studio/become-a-sponsor', limit: false },
   'sponsor-thanks': { label: 'Sponsors', admin: '/admin?tab=sponsors', limit: true },
   officers: { label: 'Booster Members', admin: '/admin?tab=booster-members', limit: false },
@@ -568,6 +571,7 @@ const EMBED = (inner) => `<div class="home-redesign studio-live-embed">${inner}<
 export const LIVE_TEMPLATES = {
   events: EMBED('<section class="studio-live-events"><div class="events" data-home-slot="events" data-home-dynamic><p class="note">Upcoming events appear here from the Calendar.</p></div></section>'),
   'sponsor-thanks': EMBED('<div class="thanks"><div class="thanks-logos" data-home-slot="sponsor-thanks" data-home-dynamic><p class="note">Sponsor logos appear here from Sponsors.</p></div></div>'),
+  'event-cards': '<section class="fundraising-cards studio-event-cards"><div class="wrap"><div class="fundraising-card-list" data-home-slot="event-cards" data-category="fundraiser" data-limit="3" data-home-dynamic><p class="note">Upcoming events appear here as cards from the Calendar.</p></div></div></section>',
   'next-fund': EMBED('<aside class="next-fund" data-home-slot="next-fund" data-home-dynamic><div class="nf-top"><span class="nf-kicker">Next fundraiser</span></div><h3>Coming soon</h3><p>The next fundraiser on the Calendar appears here.</p></aside>'),
 };
 
@@ -670,6 +674,12 @@ export function tweakOpen(html, p = {}) {
       ? tag.replace(/\sdata-limit="[^"]*"/, ` data-limit="${p.limit}"`)
       : tag.replace(/(\/?>)$/, ` data-limit="${p.limit}"$1`)));
   }
+  if (typeof p.category === 'string' && /^[a-z]+$/.test(p.category)) {
+    const slotRe = /<[a-zA-Z0-9-]+\b[^>]*?data-home-slot="event-cards"[^>]*>/;
+    out = out.replace(slotRe, (tag) => (/\sdata-category="[^"]*"/.test(tag)
+      ? tag.replace(/\sdata-category="[^"]*"/, ` data-category="${p.category}"`)
+      : tag.replace(/(\/?>)$/, ` data-category="${p.category}"$1`)));
+  }
   if (Number.isInteger(p.span) && p.span >= 1 && p.span < GRID_COLUMNS) {
     const width = `width:${+((p.span / GRID_COLUMNS) * 100).toFixed(3)}%;max-width:100%`;
     out = out.replace(/^(<[a-zA-Z0-9-]+)([^>]*?)(\/?>)/, (all, t, rest, end) => (
@@ -710,6 +720,8 @@ function validateTreeBlock(block, bw, errors, { allowHtml, base, takeId }) {
     if (!LIVE_SOURCES[p.source]) errors.push(`${bw}: unknown live source ${p.source}`);
     if (typeof p.html !== 'string') errors.push(`${bw}: live html required`);
     if (p.limit != null && !(isInt(p.limit) && p.limit >= 1 && p.limit <= 24)) errors.push(`${bw}: number of items must be 1-24`);
+    if (p.category != null && !EVENT_CARD_CATEGORY_IDS.includes(p.category)) errors.push(`${bw}: unknown event category ${p.category}`);
+    if (p.source === 'event-cards' && p.limit != null && p.limit > 12) errors.push(`${bw}: event cards show 1-12 items`);
     const template = Object.values(LIVE_TEMPLATES).includes(p.html);
     if (!allowHtml && !template && !(old && old.type === 'live' && old.props.html === p.html && old.props.source === p.source)) {
       errors.push(`${bw}: live data blocks can't be hand-edited`);

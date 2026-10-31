@@ -49,6 +49,7 @@
       ['events', '📅', 'Events', liveMake('events', 4), { w: 12, h: 4 }],
       ['sponsors', '🤝', 'Sponsors', liveMake('sponsor-thanks'), { w: 12, h: 3 }],
       ['nextfund', '💰', 'Next fundraiser', liveMake('next-fund'), { w: 6, h: 4 }],
+      ['eventcards', '🗓️', 'Event cards', liveMake('event-cards', 3), { w: 12, h: 6 }],
     ]],
   ];
 
@@ -1233,6 +1234,11 @@
       if (info.limit) {
         const cur = p.limit || 0;
         host.append(kv('Number of items', select([['0', 'Default'], ...Array.from({ length: 12 }, (_, i) => [String(i + 1), String(i + 1)])], cur, (v) => { const n = Number(v); if (n) p.limit = n; else delete p.limit; changed(); }, !lay)));
+      }
+      if (info.category) {
+        const cats = [['fundraiser', 'Fundraisers'], ['all', 'All events'], ['game', 'Games'], ['rehearsal', 'Rehearsals'], ['meeting', 'Meetings'], ['deadline', 'IMPORTANT dates'], ['trip', 'Trips'], ['other', 'Other']];
+        host.append(kv('Category', select(cats, p.category || 'fundraiser', (v) => { p.category = v; changed(); }, !lay)));
+        host.append(el('p', { class: 'st-note', text: 'Cards show upcoming events from the Calendar. To change a card, edit its event in the Calendar.' }));
       }
     }
     if (b.type === 'logos') host.append(el('p', { class: 'st-note', text: 'Shows the school logo and the Blue Regiment mark automatically.' }));

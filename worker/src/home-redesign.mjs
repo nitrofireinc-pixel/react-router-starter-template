@@ -614,6 +614,7 @@ export function renderFundraisingCard(event, {
   primaryButton,
   primaryUrl = '',
   showAddToCalendar = true,
+  kindLabel = 'Fundraiser',
 } = {}) {
   const rawTitle = plainText(event?.title) || plainText(flyerAlt) || 'Current Fundraiser';
   const title = fundraiserDisplayTitle(rawTitle) || rawTitle;
@@ -644,7 +645,7 @@ export function renderFundraisingCard(event, {
     primaryUrl,
   });
   const extra = plainText(customLabel);
-  const pills = `<div class="pill-row"><span class="pill pill-gold">Fundraiser</span>${attend ? '<span class="pill pill-red">Band members must attend</span>' : ''}${volunteers ? '<span class="pill pill-blue">Volunteers needed</span>' : ''}${extra ? `<span class="pill">${escapeHtml(extra)}</span>` : ''}</div>`;
+  const pills = `<div class="pill-row"><span class="pill pill-gold">${escapeHtml(kindLabel || 'Fundraiser')}</span>${attend ? '<span class="pill pill-red">Band members must attend</span>' : ''}${volunteers ? '<span class="pill pill-blue">Volunteers needed</span>' : ''}${extra ? `<span class="pill">${escapeHtml(extra)}</span>` : ''}</div>`;
   const calendar = showAddToCalendar
     ? `<a class="btn btn-outline" href="${escapeAttr(calendarHref)}">Add to calendar</a>`
     : '';
@@ -760,9 +761,71 @@ const limitList = (list, limit) => (limit == null ? list : list.slice(0, limit))
  * Become a Sponsor tiers, Booster Members, Sponsors). Used by Home and by any
  * Studio page that embeds a live data block.
  */
+/** Event-cards categories a Studio block can pick ('all' or a Calendar track). */
+export const EVENT_CARD_CATEGORIES = ['all', 'fundraiser', 'game', 'rehearsal', 'meeting', 'deadline', 'trip', 'other'];
+
+function eventMatchesCategory(event, category) {
+  if (!category || category === 'all') return true;
+  if (category === 'fundraiser') return isHomeFundraiserEvent(event) || String(event.track || '').toLowerCase() === 'fundraiser';
+  return String(event.track || '').toLowerCase() === category && !isHomeFundraiserEvent(event);
+}
+
+/** One live event card: the public fundraising-card design, filled from the Calendar event. */
+export function renderEventCard(event, cards = []) {
+  const fund = isHomeFundraiserEvent(event) || String(event.track || '').toLowerCase() === 'fundraiser';
+  const card = fund ? (cards.find((c) => c.source_event_id != null && String(c.source_event_id) === String(event.id)) || null) : null;
+  const flyer = card && card.picture_mode === 'image' ? sanitizePublicUrl(card.image_url) : '';
+  return renderFundraisingCard(event, {
+    flyer,
+    flyerAlt: event.title,
+    description: plainText(event.description),
+    mustAttend: Boolean(Number(event.must_attend)),
+    volunteersNeeded: fund ? undefined : false,
+    kindLabel: homeEventTag(event).label,
+  });
+}
+
+/** Upcoming, not-cancelled Calendar events for one event-cards block. */
+export function selectEventCards(events = [], { category = 'all', limit = 3, today = '' } = {}) {
+  const day = today || new Date().toISOString().slice(0, 10);
+  const n = Math.min(Math.max(Number(limit) || 3, 1), 12);
+  return (Array.isArray(events) ? events : [])
+    .filter((e) => e && e.start_date && !e.cancelled_at && ((e.end_date || e.start_date) >= day))
+    .filter((e) => eventMatchesCategory(e, category))
+    .slice(0, n);
+}
+
+/** Fill every data-home-slot="event-cards" block (each with its own category/limit). */
+export function fillEventCardSlots(html, data = {}) {
+  const src = String(html || '');
+  if (!src.includes('data-home-slot="event-cards"')) return src;
+  const openRe = /<([a-z0-9]+)\b[^>]*\bdata-home-slot="event-cards"[^>]*>/gi;
+  let out = ''; let last = 0; let m;
+  while ((m = openRe.exec(src))) {
+    const tag = m[1].toLowerCase();
+    const start = m.index + m[0].length;
+    const token = new RegExp(`</?${tag}\\b[^>]*>`, 'gi');
+    token.lastIndex = start;
+    let depth = 1; let t;
+    while ((t = token.exec(src))) { depth += t[0].startsWith('</') ? -1 : 1; if (depth === 0) break; }
+    if (!t) break;
+    const category = (m[0].match(/\sdata-category="([a-z]+)"/) || [])[1] || 'all';
+    const limit = Number((m[0].match(/\sdata-limit="(\d+)"/) || [])[1] || 3);
+    const list = selectEventCards(data.events || [], { category, limit, today: data.today });
+    const inner = list.length
+      ? list.map((event) => renderEventCard(event, data.fundraiserCards || [])).join('')
+      : '<p class="note event-cards-empty">No upcoming events right now. Check the calendar soon.</p>';
+    out += src.slice(last, start) + inner;
+    last = t.index;
+    openRe.lastIndex = t.index;
+  }
+  return out + src.slice(last);
+}
+
 export function fillLiveSlots(html, data = {}) {
   let next = String(html || '');
   if (!next.includes('data-home-slot')) return next;
+  next = fillEventCardSlots(next, data);
   const schedule = selectHomeSchedule(data.events || []);
   const nf = schedule.nextFundraiser;
   const cards = data.fundraiserCards || [];
