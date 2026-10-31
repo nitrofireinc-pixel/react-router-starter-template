@@ -15882,6 +15882,10 @@ async function dispatchWorker(request, env, ctx) {
       target.searchParams.set('subscribe', '1');
       return Response.redirect(target.toString(), 302);
     }
+    if (url.pathname === '/index.html' || url.pathname === '/index') {
+      // The raw template index.html is stale; Home is the CMS page at /. Keep query strings.
+      return Response.redirect(new URL('/' + url.search, url.origin).toString(), 301);
+    }
     if (url.pathname === '/caldev' || url.pathname === '/caldev/' || url.pathname === '/caldev.html') {
       return Response.redirect(new URL('/calendar.html', url.origin).toString(), 302);
     }
