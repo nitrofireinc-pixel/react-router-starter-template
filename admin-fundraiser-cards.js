@@ -181,6 +181,7 @@
     field('location').value = card.location || '';
     field('start_time').value = card.start_time || '';
     field('end_time').value = card.end_time || '';
+    applyCalendarLock(card);
     editor.querySelectorAll('[name="picture_mode"]').forEach((input) => {
       input.checked = input.value === (card.picture_mode || 'date_tile');
     });
@@ -209,6 +210,30 @@
     refreshPreview();
   }
 
+  /** Linked cards: date/time come from the calendar event, shown read-only with live values. */
+  function applyCalendarLock(card) {
+    const linked = Boolean(card?.live_event_date);
+    const live = { event_date: card?.live_event_date, start_time: card?.live_start_time, end_time: card?.live_end_time };
+    ['event_date', 'start_time', 'end_time'].forEach((name) => {
+      const input = field(name);
+      if (!input) return;
+      if (linked) input.value = live[name] || '';
+      input.readOnly = linked;
+      input.toggleAttribute('aria-readonly', linked);
+      input.classList.toggle('fc-locked', linked);
+      input.title = linked ? 'Set by the calendar event' : '';
+    });
+    let lockNote = editor.querySelector('[data-fc-lock]');
+    if (!lockNote) {
+      lockNote = document.createElement('p');
+      lockNote.setAttribute('data-fc-lock', '');
+      lockNote.className = 'fc-editor-note fc-lock-note';
+      lockNote.textContent = 'Set by the calendar event';
+      field('event_date').closest('.fc-grid-2')?.before(lockNote);
+    }
+    lockNote.hidden = !linked;
+  }
+
   function selectCard(id, { silent = false } = {}) {
     const card = cards.find((item) => Number(item.id) === Number(id));
     if (!card) return;
@@ -224,13 +249,13 @@
     return {
       title: field('title').value,
       description: field('description').value,
-      event_date: field('event_date').value,
+      event_date: live ? (current.event_date || '') : field('event_date').value,
       span_end: current.span_end || '',
       // Preview mirrors the public card: linked cards use the calendar's date/times.
       ...(live ? { preview_event_date: current.live_event_date, preview_start_time: current.live_start_time || '', preview_end_time: current.live_end_time || '', preview_location: current.live_location || '' } : {}),
       location: field('location').value,
-      start_time: field('start_time').value,
-      end_time: field('end_time').value,
+      start_time: live ? (current.start_time || '') : field('start_time').value,
+      end_time: live ? (current.end_time || '') : field('end_time').value,
       picture_mode: picture,
       image_url: field('image_url').value,
       must_attend: field('must_attend').checked,

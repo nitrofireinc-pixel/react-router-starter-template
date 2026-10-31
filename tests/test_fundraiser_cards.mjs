@@ -229,7 +229,7 @@ function createCardStore(seed = {}) {
 
 test('schema, audit actions, DEV cron, and CMS shortcut are wired', () => {
   assert.equal(DB_SCHEMA_VERSION, '2026-10-04.8');
-  assert.match(workerSrc, /ASSET_VERSION = 'cms-p2-20261031v'/);
+  assert.match(workerSrc, /ASSET_VERSION = 'cms-p2-20261031w'/);
   const cardsAdmin = renderFundraiserCardsAdminHtml('test');
   assert.match(cardsAdmin, /class="admin-shell cms-shell image-admin-shell"/);
   assert.match(cardsAdmin, /class="admin-workspace"/);
@@ -774,4 +774,11 @@ test('admin preview of a linked card uses live calendar values', async () => {
   assert.match(js, /class="fc-title-link" data-fc-open=/);
   assert.match(js, /if \(seq !== previewSeq\) return;/);
   assert.match(js, /card\?\.live_event_date \|\| card\?\.event_date/);
+});
+
+test('linked cards lock date/time inputs to the calendar event', () => {
+  const js = readFileSync(new URL('../admin-fundraiser-cards.js', import.meta.url), 'utf8');
+  assert.match(js, /Set by the calendar event/);
+  assert.match(js, /input\.readOnly = linked;/);
+  assert.match(js, /event_date: live \? \(current\.event_date/);
 });
