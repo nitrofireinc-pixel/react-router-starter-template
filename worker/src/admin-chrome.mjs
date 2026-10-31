@@ -1,6 +1,6 @@
 // CLASSIC EDITOR (In-Kind only): every other page opens in Site Studio. In-Kind is code-rendered
 // (logo uploads, PDF, ledger) and only has a page-settings screen.
-const VISUAL_EDITOR_NOT_YET_SLUGS = new Set(['in-kind']);
+const VISUAL_EDITOR_NOT_YET_SLUGS = new Set();
 const DEFAULT_HIDDEN_TABS = new Set(['ensembles', 'events', 'ledger', 'checkout', 'caldev', 'security-log']);
 const PAGE_LABELS = {
   home: 'Home',

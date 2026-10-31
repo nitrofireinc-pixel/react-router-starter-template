@@ -1289,7 +1289,7 @@
     if (!found) {
       host.append(el('h2', { text: 'Page settings' }), el('p', { class: 'st-selname', text: `${state?.page?.title || slug} · nothing selected` }));
       host.append(el('p', { class: 'st-note', text: 'Click anything on the page to select it. Right-click it and choose Add link. Click selected words to type. Drag ⠿ Move to move a block and the blue corner to resize it. ← CMS (top right) goes back to the staff menu.' }));
-      host.append(el('div', { class: 'st-group', text: 'Page' }), kv('Address', el('b', { text: state?.page?.path || '' })), kv('Live editor', el('b', { text: state?.page?.editor || 'legacy' })), kv('Sections', el('b', { text: String(layout?.sections?.length || 0) })));
+      host.append(el('div', { class: 'st-group', text: 'Page' }), kv('Address', el('b', { text: state?.page?.path || '' })), kv('Sections', el('b', { text: String(layout?.sections?.length || 0) })));
       host.append(el('div', { class: 'st-group', text: 'Who can edit' }), kv('Text', el('b', { text: `page:${slug}` })), kv('Layout', el('b', { text: `🔒 layout:${slug}` })));
       host.append(el('p', { class: 'st-note', text: `You can ${canLayout() ? 'change words and layout' : 'change words, links and pictures'} here.` }));
       return;
@@ -1509,7 +1509,6 @@
     if (act === 'discard') return discardAll();
     if (act === 'grid-m') { menu.hidden = true; showGrid = !showGrid; const g = $('[data-act="grid"]'); if (g) g.setAttribute('aria-pressed', String(showGrid)); const n = $('[data-gridnote]'); if (n) n.textContent = showGrid ? 'Grid: 12 columns · snap on' : 'Grid hidden · snap on'; drawOverlay(); return; }
   });
-  $('[data-editor]').addEventListener('change', async (e) => { try { await call(`${api}/editor`, 'POST', { editor: e.target.value }); await load(true); toast(`Live editor: ${e.target.value}`); } catch (er) { toast(er.message, true); } });
   $('[data-page-pick]').addEventListener('change', (e) => { if (e.target.value !== slug) window.location.href = `/admin/studio/${encodeURIComponent(e.target.value)}`; });
   async function loadPages() {
     try {
@@ -1537,7 +1536,6 @@
     }
     lastSnap = snapshot(); pseudo = new WeakMap();
     $('[data-admin-only]').hidden = !state.can_html;
-    if (state.can_flag) $('[data-editor]').value = state.page.editor || 'legacy';
     document.title = `Site Studio: ${state.page.title || slug}`;
     if (!template) await loadTemplate();
     setMode(mode); renderJson(); updateChrome();

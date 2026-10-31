@@ -292,10 +292,9 @@ export { applyWorkerSecurityHeaders, WORKER_SECURITY_HEADERS } from './worker-se
 export { isVisualPilotSlug, isVisualEditorSlug, canEditVisualPage, pageHasVisualPublish };
 
 // ── CLASSIC EDITOR (In-Kind only) ─────────────────────────────────────────────
-// Every page edits in Site Studio except In-Kind, which stays code-rendered with
-// its classic form (logo uploads, PDF, ledger) until Form Studio supports those.
-// Old classic URLs for any other page redirect to /admin/studio/<slug>.
-export const CLASSIC_EDITOR_SLUGS = new Set(['in-kind']);
+// Every page, In-Kind included, edits in Site Studio (v2 is the only editor).
+// Old classic URLs redirect to /admin/studio/<slug>.
+export const CLASSIC_EDITOR_SLUGS = new Set();
 export function classicPageRedirectTarget(slug) {
   const key = String(slug || '').trim().toLowerCase();
   if (CLASSIC_EDITOR_SLUGS.has(key)) return `/admin?tab=pages&page=${encodeURIComponent(key)}`;
@@ -612,7 +611,7 @@ const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-export const ASSET_VERSION = 'cms-p2-20261031zi';
+export const ASSET_VERSION = 'cms-p2-20261031zj';
 // Admin-only assets (Studio home). Bumping this never changes public page bytes.
 export const ADMIN_HOME_VERSION = `${ASSET_VERSION}-home5`;
 /** Admin-only cache key for the 14c sidebar + launcher (public pages keep ASSET_VERSION). */
@@ -14908,7 +14907,7 @@ async function handleStudioEditorPage(request, env, slug) {
 <span class="st-gridnote" data-gridnote>Grid: 12 columns · snap on</span></div>
 <div class="st-tb-right"><div class="st-more"><button type="button" class="st-btn" data-act="more" aria-haspopup="true" aria-expanded="false" title="More options" aria-label="More options">⋯ <span class="st-lbl">More</span></button>
 <div class="st-menu" data-menu hidden><div class="st-menu-h">Editor mode</div><button type="button" data-mode="simple">Simple</button><button type="button" data-mode="advanced">Advanced</button>
-<div data-admin-only hidden><div class="st-menu-h">Super Admin</div><button type="button" data-act="json">Layout JSON…</button><button type="button" data-act="migrate">Rebuild from current page</button><label class="st-flag">Live editor <select data-editor><option value="legacy">legacy</option><option value="v2">v2</option></select></label></div>
+<div data-admin-only hidden><div class="st-menu-h">Super Admin</div><button type="button" data-act="json">Layout JSON…</button><button type="button" data-act="migrate">Rebuild from current page</button></div>
 <div class="st-menu-h st-m-only st-d-only">View</div><button type="button" class="st-d-only" data-device="desktop" aria-pressed="true">🖥️ Desktop view</button><button type="button" class="st-d-only" data-device="phone" aria-pressed="false">📱 Phone view</button><button type="button" class="st-m-only st-d-only" data-act="grid-m">Show grid</button><div class="st-menu-h">Page</div><a href="/admin">← Staff menu</a></div></div>
 <button type="button" class="st-btn" data-act="preview" title="Preview" aria-label="Preview">👁️ <span class="st-lbl">Preview</span></button><button type="button" class="st-btn" data-act="history" aria-pressed="false" title="History" aria-label="History">🕘 <span class="st-lbl">History</span></button><button type="button" class="st-btn st-publish" data-act="publish">🚀 Publish</button><button type="button" class="st-ib st-ptoggle" data-panel-toggle="right" aria-pressed="false" aria-controls="st-right" title="Show the Settings panel" aria-label="Settings panel">◨</button></div></div>
 <main class="st-main"><aside class="st-left" id="st-left" aria-label="Add elements"><button type="button" class="st-sheet-x" data-close-sheet aria-label="Close">✕</button><h2>Add elements</h2><p class="st-sub" data-left-sub>Drag onto the page</p><div data-palette></div></aside>

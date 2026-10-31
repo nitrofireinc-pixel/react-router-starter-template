@@ -1835,7 +1835,7 @@ const SPONSOR_PAGE_SHORTCUT_EXCLUDES = new Set(['sponsors', 'become-a-sponsor', 
 const PAGE_SHORTCUT_EXCLUDES = new Set(['sponsors', 'become-a-sponsor', 'in-kind', 'letterman-jacket', 'calendar']);
 
 // CLASSIC EDITOR (In-Kind only): see worker CLASSIC_EDITOR_SLUGS.
-const VISUAL_EDITOR_NOT_YET_SLUGS = new Set(['in-kind']);
+const VISUAL_EDITOR_NOT_YET_SLUGS = new Set();
 
 function isVisualEditorPageSlug(slug) {
   const key = String(slug || '').trim().toLowerCase();

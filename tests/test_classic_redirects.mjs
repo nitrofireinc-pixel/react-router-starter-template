@@ -8,14 +8,12 @@ import { pageEditorHref } from '../worker/src/admin-chrome.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 
-test('Phase 3: only In-Kind keeps the classic (settings-only) path', () => {
-  assert.deepEqual([...CLASSIC_EDITOR_SLUGS], ['in-kind']);
-  for (const slug of ['home', 'letterman-jacket', 'resources', 'ensembles', 'coming-soon', 'fundraising']) {
+test('Phase 3: every page, In-Kind included, edits in Studio', () => {
+  assert.deepEqual([...CLASSIC_EDITOR_SLUGS], []);
+  for (const slug of ['home', 'letterman-jacket', 'resources', 'ensembles', 'coming-soon', 'fundraising', 'in-kind']) {
     assert.equal(classicPageRedirectTarget(slug), `/admin/studio/${slug}`);
     assert.equal(pageEditorHref(slug), `/admin/studio/${slug}`);
   }
-  assert.equal(classicPageRedirectTarget('in-kind'), '/admin?tab=pages&page=in-kind');
-  assert.equal(pageEditorHref('in-kind'), '/admin?tab=pages&settings=in-kind');
 });
 
 test('Phase 3: old visual editor and classic content editor are gone', () => {

@@ -7,7 +7,6 @@
 
 export const STUDIO_SCHEMA_VERSION = '2026-10-24.s2';
 export const STUDIO_SCHEMA_KEY = 'studio_schema_version';
-export const STUDIO_EDITORS = ['legacy', 'v2'];
 export const STUDIO_HISTORY_LIMIT = 3;
 export const GRID_COLUMNS = 12;
 export const GRID_ROW_UNIT = 40;
@@ -1001,7 +1000,7 @@ async function currentBaseline(env, slug, liveVersionId) {
  * canEditPageLayout, isSuperAdmin, invalidate }.
  */
 export async function handleStudioApi(request, env, url, deps) {
-  const m = url.pathname.match(/^\/api\/admin\/studio\/pages\/([a-z0-9-]+)(?:\/(draft|publish|restore|editor|render|migrate|upload))?$/);
+  const m = url.pathname.match(/^\/api\/admin\/studio\/pages\/([a-z0-9-]+)(?:\/(draft|publish|restore|render|migrate|upload))?$/);
   if (!m) return null;
   const { requireLogin, jsonResponse, canEditPageContent, canEditPageLayout, isSuperAdmin } = deps;
   const renderCtx = deps.renderCtx ? await deps.renderCtx() : {};
@@ -1079,7 +1078,7 @@ export async function handleStudioApi(request, env, url, deps) {
     ).bind(slug, JSON.stringify(layout), html, kind, String(note || '').slice(0, 200), user.id ?? null, String(user.username || '')).first();
     const id = inserted?.id;
     await env.DB.batch([
-      env.DB.prepare('UPDATE cms_pages SET live_version_id = ?, updated_at = CURRENT_TIMESTAMP WHERE slug = ?').bind(id, slug),
+      env.DB.prepare('UPDATE cms_pages SET live_version_id = ?, editor = \'v2\', updated_at = CURRENT_TIMESTAMP WHERE slug = ?').bind(id, slug),
       env.DB.prepare(
         `INSERT INTO page_drafts (slug, layout_json, base_version_id, updated_by, updated_at) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
          ON CONFLICT(slug) DO UPDATE SET layout_json = excluded.layout_json, base_version_id = excluded.base_version_id, updated_by = excluded.updated_by, updated_at = CURRENT_TIMESTAMP`,
@@ -1092,7 +1091,7 @@ export async function handleStudioApi(request, env, url, deps) {
     const bad = await checkLayout(body.layout);
     if (bad) return bad;
     const id = await publishVersion(body.layout, 'publish', body.note);
-    return jsonResponse({ ok: true, version_id: id, live: page.editor === 'v2' });
+    return jsonResponse({ ok: true, version_id: id, live: true });
   }
   if (action === 'restore') {
     const vid = Number(body.version_id);
@@ -1103,15 +1102,6 @@ export async function handleStudioApi(request, env, url, deps) {
     if (bad) return bad;
     const id = await publishVersion(layout, 'restore', `Restored version ${vid}`);
     return jsonResponse({ ok: true, version_id: id });
-  }
-  if (action === 'editor') {
-    if (!admin) return jsonResponse({ detail: 'Only a Super Admin can switch editors' }, 403);
-    const editor = String(body.editor || '');
-    if (!STUDIO_EDITORS.includes(editor)) return jsonResponse({ detail: 'editor must be legacy or v2' }, 422);
-    if (editor === 'v2' && !page.live_version_id) return jsonResponse({ detail: 'Publish a Studio version before switching to v2' }, 409);
-    await env.DB.prepare('UPDATE cms_pages SET editor = ?, updated_at = CURRENT_TIMESTAMP WHERE slug = ?').bind(editor, slug).run();
-    await invalidate();
-    return jsonResponse({ ok: true, editor });
   }
   return jsonResponse({ detail: 'Not found' }, 404);
 }

@@ -409,8 +409,8 @@ test('Phase 0 sanitizer round-trips every current DEV CMS page body', () => {
   assert.match(joinSample, /#ih1\{/);
 });
 
-test('Phase 3 Pages settings cannot overwrite page bodies; only In-Kind is classic', () => {
-  assert.match(workerSrc, /export const CLASSIC_EDITOR_SLUGS = new Set\(\['in-kind'\]\)/);
+test('Phase 3 Pages settings cannot overwrite page bodies; no page is classic', () => {
+  assert.match(workerSrc, /export const CLASSIC_EDITOR_SLUGS = new Set\(\)/);
   assert.match(workerSrc, /Page content is edited in Site Studio/);
   assert.match(workerSrc, /page\.body_html = existing\.body_html/);
   assert.match(adminSrc, /isVisualEditorPageSlug/);

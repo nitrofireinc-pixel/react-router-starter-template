@@ -140,11 +140,21 @@ test('Studio API: content editors cannot change layout or flip the flag', async 
   const moved = clone(live); moved.sections[1].blocks[0].w = 6;
   let r = await handleStudioApi(req('/api/admin/studio/pages/coming-soon/publish', { layout: moved }), { DB: db }, new URL('https://x/api/admin/studio/pages/coming-soon/publish'), deps(editor));
   assert.equal(r.status, 403);
-  r = await handleStudioApi(req('/api/admin/studio/pages/coming-soon/editor', { editor: 'v2' }), { DB: db }, new URL('https://x/api/admin/studio/pages/coming-soon/editor'), deps(editor));
-  assert.equal(r.status, 403);
+  // v2 is the only editor: the old legacy/v2 switch route is gone.
   r = await handleStudioApi(req('/api/admin/studio/pages/coming-soon/editor', { editor: 'v2' }), { DB: db }, new URL('https://x/api/admin/studio/pages/coming-soon/editor'), deps({ id: 1, role: 'admin' }));
-  assert.equal(r.status, 409); // must publish first
+  assert.ok(!r || r.status === 404);
   resetStudioSchemaMemo();
+});
+
+test('studio: Live editor switch removed, publish makes the page v2', async () => {
+  const { readFileSync } = await import('node:fs');
+  const js = readFileSync(new URL('../admin-studio.js', import.meta.url), 'utf8');
+  const w = readFileSync(new URL('../worker/src/worker.mjs', import.meta.url), 'utf8');
+  const st = readFileSync(new URL('../worker/src/studio.mjs', import.meta.url), 'utf8');
+  assert.doesNotMatch(w, /data-editor|Live editor/);
+  assert.doesNotMatch(js, /data-editor|Live editor/);
+  assert.doesNotMatch(st, /action === 'editor'|\|editor\||STUDIO_EDITORS/);
+  assert.match(st, /SET live_version_id = \?, editor = \\?'v2\\?'/);
 });
 
 test('studio editor: undo capped at 3, visible undo/redo + discard, mobile sheets', async () => {
