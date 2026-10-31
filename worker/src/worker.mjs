@@ -611,7 +611,7 @@ const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-export const ASSET_VERSION = 'cms-p2-20261031zo';
+export const ASSET_VERSION = 'cms-p2-20261031zp';
 // Admin-only assets (Studio home). Bumping this never changes public page bytes.
 export const ADMIN_HOME_VERSION = `${ASSET_VERSION}-home5`;
 /** Admin-only cache key for the 14c sidebar + launcher (public pages keep ASSET_VERSION). */
@@ -14466,8 +14466,23 @@ ${renderAdminSidebarBackdrop()}
 ${renderAdminSidebarHtml(ASSET_VERSION, nav)}`;
 }
 
+const SL_MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+/** Security Log panel: role-aware markup (Admin never gets export/verify/genesis controls) + current Eastern month/year. */
+export function renderSecurityLogPanelHtml(html, user, now = new Date()) {
+  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', year: 'numeric', month: 'numeric' }).formatToParts(now).map((p) => [p.type, p.value]));
+  const month = Number(parts.month); const year = Number(parts.year);
+  const months = SL_MONTH_NAMES.map((name, i) => `<option value="${i + 1}"${i + 1 === month ? ' selected' : ''}>${name}</option>`).join('');
+  let years = '';
+  for (let y = year + 1; y >= 2024; y -= 1) years += `<option value="${y}"${y === year ? ' selected' : ''}>${y}</option>`;
+  const manage = canManageSecurityLog(user);
+  return html
+    .replace(/<!--SL_MANAGE-->([\s\S]*?)<!--\/SL_MANAGE-->/g, (_, inner) => (manage ? inner : ''))
+    .replace('__SL_MONTH_OPTIONS__', months)
+    .replace('__SL_YEAR_OPTIONS__', years);
+}
+
 function renderAdminAppHtml(user, nav = {}) {
-  return ADMIN_HTML.replace('__ADMIN_SIDEBAR__', renderAdminSidebarHtml(ASSET_VERSION, {
+  return renderSecurityLogPanelHtml(ADMIN_HTML, user).replace('__ADMIN_SIDEBAR__', renderAdminSidebarHtml(ASSET_VERSION, {
     user,
     allow: (tab) => adminSidebarAllows(user, tab),
     ...nav,
@@ -16635,28 +16650,24 @@ __ADMIN_SIDEBAR__
 </form>
 </div>
 </section>
-<section id="tab-security-log" class="cms-panel security-log-panel" hidden><div class="panel-head"><div><p class="kicker">Security</p><h1>Security Audit Log</h1><p>Super Admin: full access. Admin: view only. Month/year defaults to the current Eastern month. 25 entries per page, newest first. Download PDF for the selected month. This log cannot be edited or deleted, and access cannot be granted to other users.</p></div><div class="panel-actions"><a class="btn outline" id="download-security-log" href="/api/admin/security-log.pdf">Download month PDF</a><a class="btn outline" id="download-security-log-csv" href="/api/admin/security-log.csv">Download CSV</a><a class="btn outline" id="download-security-log-json" href="/api/admin/security-log.json">Download JSON</a><button class="btn outline" type="button" id="verify-security-log">Verify integrity</button><button class="btn outline" type="button" id="refresh-security-log">Refresh</button></div></div>
+<section id="tab-security-log" class="cms-panel security-log-panel" hidden><div class="panel-head"><div><p class="kicker">Security</p><h1>Security Audit Log</h1><p>Super Admin: full access. Admin: view only. Month/year defaults to the current Eastern month. 25 entries per page, newest first.<!--SL_MANAGE--> Download PDF for the selected month.<!--/SL_MANAGE--> This log cannot be edited or deleted, and access cannot be granted to other users.</p></div><div class="panel-actions"><!--SL_MANAGE--><a class="btn outline" id="download-security-log" href="/api/admin/security-log.pdf">Download month PDF</a><a class="btn outline" id="download-security-log-csv" href="/api/admin/security-log.csv">Download CSV</a><a class="btn outline" id="download-security-log-json" href="/api/admin/security-log.json">Download JSON</a><button class="btn outline" type="button" id="verify-security-log">Verify integrity</button><!--/SL_MANAGE--><button class="btn outline" type="button" id="refresh-security-log">Refresh</button></div></div>
 <div id="security-log-court" class="security-log-court" hidden></div>
 <div class="admin-card security-log-filters">
   <div class="form-grid security-log-filter-grid">
-    <label>Month<select id="security-log-month">
-      <option value="1">January</option><option value="2">February</option><option value="3">March</option><option value="4">April</option>
-      <option value="5">May</option><option value="6">June</option><option value="7">July</option><option value="8">August</option>
-      <option value="9">September</option><option value="10">October</option><option value="11">November</option><option value="12">December</option>
-    </select></label>
-    <label>Year<select id="security-log-year"></select></label>
+    <label>Month<select id="security-log-month" data-ready="1">__SL_MONTH_OPTIONS__</select></label>
+    <label>Year<select id="security-log-year" data-ready="1">__SL_YEAR_OPTIONS__</select></label>
     <label>User<input id="security-log-actor" type="search" placeholder="username" autocomplete="off"></label>
     <label>Action<select id="security-log-action"><option value="">All actions</option>${ADMIN_AUDIT_KNOWN_ACTIONS.map((action) => `<option value="${action}">${action}</option>`).join('')}</select></label>
     <label>From date<input id="security-log-from" type="date"></label>
     <label>To date<input id="security-log-to" type="date"></label>
     <label class="full">Search this page<input id="security-log-q" type="search" placeholder="summary, path, or details" autocomplete="off"></label>
   </div>
-  <p class="muted">This page lists the current month only. Use <b>Verify integrity</b> to walk the whole log. Entries can't be edited or deleted through the website, and the database itself blocks changes. Any change made by going around those protections would break the chain, which this check detects.</p>
+  <p class="muted">This page lists the current month only.<!--SL_MANAGE--> Use <b>Verify integrity</b> to walk the whole log.<!--/SL_MANAGE--> Entries can't be edited or deleted through the website, and the database itself blocks changes. Any change made by going around those protections would break the chain, which this check detects.</p>
   <p class="status" id="security-log-chain" aria-live="polite"></p>
   <p class="status" id="security-log-verify" hidden></p>
   <p class="error" id="security-log-write-warning" hidden></p>
   <p class="status" id="security-log-status" aria-live="polite"></p>
-  <details class="security-log-genesis">
+  <!--SL_MANAGE--><details class="security-log-genesis">
     <summary>Start a new log generation (Trevor authorization required)</summary>
     <p class="muted">Keeps every old row. The next Cloudflare secret <code>AUDIT_LOG_KEY_Kn</code> must already be piped in with a CSPRNG. This writes <code>log.genesis</code> and continues the hash chain.</p>
     <label>Reason<textarea id="security-log-genesis-reason" rows="2" maxlength="400" placeholder="Why this generation is starting"></textarea></label>
@@ -16664,7 +16675,7 @@ __ADMIN_SIDEBAR__
     <label class="checkline"><input type="checkbox" id="security-log-genesis-confirm"> I confirm START NEW LOG</label>
     <button class="btn outline" type="button" id="security-log-genesis-start">Start new log</button>
     <p class="status" id="security-log-genesis-status" aria-live="polite"></p>
-  </details>
+  </details><!--/SL_MANAGE-->
 </div>
 <div class="admin-card">
   <div id="security-log-list" class="security-log-list" aria-live="polite"></div>

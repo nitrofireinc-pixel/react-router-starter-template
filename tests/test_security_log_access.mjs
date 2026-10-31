@@ -86,3 +86,27 @@ test('edit methods are blocked for everyone', async () => {
     assert.ok(r.status >= 400 && r.status < 500 && r.status !== 404, `${m} ${r.status}`);
   }
 });
+
+test('POST /api/admin/security-log/genesis is 403 view_only for Admin and writes nothing', async () => {
+  resetDbInitCache();
+  const r = await call(env(), ADMIN, ['POST', '/api/admin/security-log/genesis']);
+  assert.equal(r.status, 403); assert.match(r.body, /"mode":"view_only"/);
+  for (const u of LOWER.slice(0, 4)) { resetDbInitCache(); assert.equal((await call(env(), u, ['POST', '/api/admin/security-log/genesis'])).status, 403); }
+});
+
+test('server HTML: Admin never gets export/verify/genesis controls; month/year filled (Eastern)', async () => {
+  const { renderSecurityLogPanelHtml } = await import('../worker/src/worker.mjs');
+  const src = (await import('node:fs')).readFileSync(new URL('../worker/src/worker.mjs', import.meta.url), 'utf8');
+  const tpl = src.slice(src.indexOf('<section id="tab-security-log"'), src.indexOf('</section>', src.indexOf('<section id="tab-security-log"')));
+  const now = new Date('2026-11-01T02:30:00Z'); // still Oct 31 in New York
+  const a = renderSecurityLogPanelHtml(tpl, ADMIN, now); const s = renderSecurityLogPanelHtml(tpl, SUPER, now);
+  for (const bad of ['download-security-log', 'verify-security-log', 'security-log-genesis', 'Start a new log generation', 'Verify integrity', 'Download PDF', 'SL_MANAGE']) assert.ok(!a.includes(bad), bad);
+  for (const good of ['download-security-log"', 'download-security-log-csv', 'download-security-log-json', 'verify-security-log', 'security-log-genesis', 'Use <b>Verify integrity</b>']) assert.ok(s.includes(good), good);
+  assert.ok(!s.includes('SL_MANAGE'));
+  for (const h of [a, s]) {
+    assert.match(h, /<option value="10" selected>October<\/option>/);
+    assert.match(h, /<option value="2026" selected>2026<\/option>/);
+    assert.ok(!h.includes('__SL_'));
+    assert.match(h, /refresh-security-log/);
+  }
+});

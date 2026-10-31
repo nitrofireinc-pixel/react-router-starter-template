@@ -4274,9 +4274,9 @@ let securityLogLoadSeq = 0;
 
 async function loadSecurityLog({ resetPage = false } = {}) {
   const loadSeq = ++securityLogLoadSeq;
-  if (!isSuperAdmin()) {
+  if (!isSuperAdmin() && !isSiteAdminUser()) {
     const list = document.querySelector('#security-log-list');
-    if (list) list.innerHTML = '<p class="error">Security log is Super Admin only.</p>';
+    if (list) list.innerHTML = '<p class="error">Security log is Super Admin and Admin only.</p>';
     return;
   }
   initSecurityLogFilters();

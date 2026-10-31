@@ -3283,7 +3283,7 @@ test('push service worker and web app manifest assets exist', () => {
   assert.match(adminJs, /securityLogPageSize: 25/);
   assert.match(adminJs, /security-log-month/);
   assert.match(adminJs, /security-log/);
-  assert.match(adminJs, /Security log is Super Admin only/);
+  assert.match(adminJs, /Security log is Super Admin and Admin only/);
   assert.doesNotMatch(adminJs, /minutes-view-modal/);
   assert.match(styles, /\.user-admin-row \.user-last-login/);
   assert.match(styles, /is-minutes-viewing/);
