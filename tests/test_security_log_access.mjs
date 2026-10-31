@@ -102,11 +102,23 @@ test('server HTML: Admin never gets export/verify/genesis controls; month/year f
   const a = renderSecurityLogPanelHtml(tpl, ADMIN, now); const s = renderSecurityLogPanelHtml(tpl, SUPER, now);
   for (const bad of ['download-security-log', 'verify-security-log', 'security-log-genesis', 'Start a new log generation', 'Verify integrity', 'Download PDF', 'SL_MANAGE']) assert.ok(!a.includes(bad), bad);
   for (const good of ['download-security-log"', 'download-security-log-csv', 'download-security-log-json', 'verify-security-log', 'security-log-genesis', 'Use <b>Verify integrity</b>']) assert.ok(s.includes(good), good);
-  assert.ok(!s.includes('SL_MANAGE'));
+  assert.ok(!s.includes('SL_MANAGE') && !s.includes('SL_VIEW') && !a.includes('SL_VIEW'));
+  assert.ok(!a.includes('this check')); assert.match(a, /which a Super Admin can detect/);
+  assert.match(s, /which this check detects/); assert.ok(!s.includes('a Super Admin can detect'));
   for (const h of [a, s]) {
     assert.match(h, /<option value="10" selected>October<\/option>/);
     assert.match(h, /<option value="2026" selected>2026<\/option>/);
     assert.ok(!h.includes('__SL_'));
     assert.match(h, /refresh-security-log/);
   }
+});
+
+test('browser code loads the Security Log list for Admin as well as Super Admin', async () => {
+  const js = (await import('node:fs')).readFileSync(new URL('../admin.js', import.meta.url), 'utf8');
+  assert.match(js, /if \(name === 'security-log'\) \{\s*if \(!isSuperAdmin\(\) && !isSiteAdminUser\(\)\) return;\s*loadSecurityLog/);
+});
+
+test('browser code loads the Security Log list for Admin as well as Super Admin', async () => {
+  const js = (await import('node:fs')).readFileSync(new URL('../admin.js', import.meta.url), 'utf8');
+  assert.match(js, /if \(name === 'security-log'\) \{\s*if \(!isSuperAdmin\(\) && !isSiteAdminUser\(\)\) return;\s*loadSecurityLog/);
 });

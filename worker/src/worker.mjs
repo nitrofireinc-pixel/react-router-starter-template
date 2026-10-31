@@ -611,7 +611,7 @@ const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-export const ASSET_VERSION = 'cms-p2-20261031zp';
+export const ASSET_VERSION = 'cms-p2-20261031zq';
 // Admin-only assets (Studio home). Bumping this never changes public page bytes.
 export const ADMIN_HOME_VERSION = `${ASSET_VERSION}-home5`;
 /** Admin-only cache key for the 14c sidebar + launcher (public pages keep ASSET_VERSION). */
@@ -14477,6 +14477,7 @@ export function renderSecurityLogPanelHtml(html, user, now = new Date()) {
   const manage = canManageSecurityLog(user);
   return html
     .replace(/<!--SL_MANAGE-->([\s\S]*?)<!--\/SL_MANAGE-->/g, (_, inner) => (manage ? inner : ''))
+    .replace(/<!--SL_VIEW-->([\s\S]*?)<!--\/SL_VIEW-->/g, (_, inner) => (manage ? '' : inner))
     .replace('__SL_MONTH_OPTIONS__', months)
     .replace('__SL_YEAR_OPTIONS__', years);
 }
@@ -16662,7 +16663,7 @@ __ADMIN_SIDEBAR__
     <label>To date<input id="security-log-to" type="date"></label>
     <label class="full">Search this page<input id="security-log-q" type="search" placeholder="summary, path, or details" autocomplete="off"></label>
   </div>
-  <p class="muted">This page lists the current month only.<!--SL_MANAGE--> Use <b>Verify integrity</b> to walk the whole log.<!--/SL_MANAGE--> Entries can't be edited or deleted through the website, and the database itself blocks changes. Any change made by going around those protections would break the chain, which this check detects.</p>
+  <p class="muted">This page lists the current month only.<!--SL_MANAGE--> Use <b>Verify integrity</b> to walk the whole log.<!--/SL_MANAGE--> Entries can't be edited or deleted through the website, and the database itself blocks changes.<!--SL_MANAGE--> Any change made by going around those protections would break the chain, which this check detects.<!--/SL_MANAGE--><!--SL_VIEW--> Any change made by going around those protections would break the chain, which a Super Admin can detect.<!--/SL_VIEW--></p>
   <p class="status" id="security-log-chain" aria-live="polite"></p>
   <p class="status" id="security-log-verify" hidden></p>
   <p class="error" id="security-log-write-warning" hidden></p>

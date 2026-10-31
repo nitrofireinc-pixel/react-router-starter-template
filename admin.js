@@ -1797,7 +1797,7 @@ function activateTab(name) {
       initCheckoutPanel().catch(() => {});
     }
     if (name === 'security-log') {
-      if (!isSuperAdmin()) return;
+      if (!isSuperAdmin() && !isSiteAdminUser()) return;
       loadSecurityLog({ resetPage: true }).catch(() => {});
     }
     if (name === 'caldev') {
