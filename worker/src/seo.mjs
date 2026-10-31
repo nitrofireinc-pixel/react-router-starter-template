@@ -114,7 +114,7 @@ export const SEO_PAGE_DEFAULTS = Object.freeze({
   }
 });
 /** Slugs never listed in the sitemap (utility, error and private pages). */
-const SITEMAP_EXCLUDED_SLUGS = new Set(['not-found', 'maintenance', 'dues-dev', 'sponsor-payment-complete', 'qr', 'caldev', 'coming-soon']);
+const SITEMAP_EXCLUDED_SLUGS = new Set(['not-found', 'maintenance', 'dues-dev', 'sponsor-payment-complete', 'qr', 'caldev', 'coming-soon', 'index', 'letterman-jacket', 'letterman-jacket-v2', 'sitemap']);
 
 const esc = (v) => String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
@@ -275,19 +275,35 @@ export function renderRobotsTxt() {
   ].join('\n');
 }
 
-export function renderSitemapXml(pages = []) {
+/** Public pages for /sitemap.xml and /sitemap.html: active, in the nav (nav_order < 1000), not utility/private/redirected. */
+export function sitemapPages(pages = []) {
   const seen = new Set();
-  const urls = [];
+  const out = [];
   for (const page of pages || []) {
     if (!page || !Number(page.active ?? 1)) continue;
+    if (Number(page.nav_order) >= 1000) continue;
     const slug = pageSlug(page);
     if (!slug || SITEMAP_EXCLUDED_SLUGS.has(slug) || slug.startsWith('error-')) continue;
     const path = canonicalPath(page);
-    if (path.startsWith('/admin') || path.startsWith('/api') || seen.has(path)) continue;
+    if (path.startsWith('/admin') || path.startsWith('/api') || /dev/i.test(path) || seen.has(path)) continue;
     seen.add(path);
-    const lastmod = String(page.updated_at || '').slice(0, 10);
+    out.push({ page, slug, path, title: String(page.title || slug) });
+  }
+  if (!seen.has('/')) out.unshift({ page: null, slug: 'home', path: '/', title: 'Home' });
+  if (!seen.has('/news')) out.push({ page: null, slug: 'news', path: '/news', title: 'News' });
+  return out;
+}
+
+export function renderSitemapHtmlBody(pages = []) {
+  const items = sitemapPages(pages).map(({ path, title }) => `<li><a href="${esc(path)}">${esc(title)}</a></li>`).join('');
+  return `<section class="section sitemap-page"><div class="wrap"><h1>Site Map</h1><ul class="sitemap-list">${items}</ul></div></section>`;
+}
+
+export function renderSitemapXml(pages = []) {
+  const urls = [];
+  for (const { page, slug, path } of sitemapPages(pages)) {
+    const lastmod = String(page?.updated_at || '').slice(0, 10);
     urls.push(`  <url><loc>${esc(SEO_ORIGIN + path)}</loc>${/^\d{4}-\d{2}-\d{2}$/.test(lastmod) ? `<lastmod>${lastmod}</lastmod>` : ''}<priority>${slug === 'home' ? '1.0' : (slug === 'fundraising' || slug === 'become-a-sponsor') ? '0.9' : '0.7'}</priority></url>`);
   }
-  if (!seen.has('/')) urls.unshift(`  <url><loc>${SEO_ORIGIN}/</loc><priority>1.0</priority></url>`);
   return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls.join('\n')}\n</urlset>\n`;
 }

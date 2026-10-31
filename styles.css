@@ -6737,3 +6737,10 @@ html body:not(.admin-body) .sponsor-marquee-section.is-ticker-away{transform:tra
 .caldev-detail-panel{padding-right:64px}
 .caldev-detail-panel .caldev-detail-close{position:absolute;top:10px;right:10px;width:44px;height:44px;min-width:44px;min-height:44px;display:grid;place-items:center;padding:0;border:1px solid rgba(0,33,66,.18);border-radius:999px;background:#eef3f8;color:#002142;font-size:1.6rem;line-height:1;cursor:pointer;z-index:3}
 .caldev-detail-panel .caldev-detail-close:hover,.caldev-detail-panel .caldev-detail-close:focus-visible{background:#dbe5f0;outline:2px solid #002142;outline-offset:2px}
+
+/* Public site map (/sitemap.html) */
+.sitemap-page h1{margin:0 0 1rem}
+.sitemap-list{list-style:none;margin:0 0 2rem;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:.6rem}
+.sitemap-list a{display:block;padding:.8rem 1rem;border:1px solid rgba(0,32,91,.18);border-radius:10px;color:#00205b;font-weight:700;text-decoration:none;background:#fff;min-height:44px;box-sizing:border-box}
+.sitemap-list a:hover,.sitemap-list a:focus-visible{background:#00205b;color:#fff}
+@media (max-width:600px){.sitemap-list{grid-template-columns:1fr}}

@@ -1,7 +1,7 @@
 import { loadStudioHome } from './studio-home.mjs';
 import { handleFormStudioApi, composeMail as composeFormStudioMail } from './form-studio-api.mjs';
 import { fillFormBlocks, purgeOldSubmissions, drainMailQueue, recheckLinks, FORM_STUDIO_CSS } from './form-studio.mjs';
-import { renderSeoHead, renderRobotsTxt, renderSitemapXml, normalizePageSeo, SEO_PAGE_DEFAULTS } from './seo.mjs';
+import { renderSeoHead, renderRobotsTxt, renderSitemapXml, renderSitemapHtmlBody, normalizePageSeo, SEO_PAGE_DEFAULTS } from './seo.mjs';
 import { DEFAULT_CMS_PAGES } from './default-pages.mjs';
 import {
   FORMS_ACCESS_KEY,
@@ -612,7 +612,7 @@ const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-export const ASSET_VERSION = 'cms-p2-20261031zg';
+export const ASSET_VERSION = 'cms-p2-20261031zh';
 // Admin-only assets (Studio home). Bumping this never changes public page bytes.
 export const ADMIN_HOME_VERSION = `${ASSET_VERSION}-home5`;
 /** Admin-only cache key for the 14c sidebar + launcher (public pages keep ASSET_VERSION). */
@@ -9916,6 +9916,21 @@ async function handleNewsAdminPage(request, env) {
   }, [{ title: 'News', path: '/news' }, ...pages], forms)), user);
 }
 
+async function renderSitemapPublicPage(request, env, url, ctx) {
+  const today = easternTodayIso();
+  const chrome = await loadPublicChromeReads(env, today, ctx);
+  const site = chrome.site || {};
+  const deadlineBanners = buildDeadlineBannerItems(chrome.deadlineEvents || [], today);
+  return htmlResponse(renderCmsPage({
+    slug: 'sitemap', path: '/sitemap.html', title: 'Site Map', is_home: 0, active: 1,
+    body_html: renderSitemapHtmlBody(chrome.pages || []),
+  }, site, chrome.pages || [], [], [], [], chrome.sponsors || [], {
+    photos: [], showSponsorMarquee: true,
+    deadlineBannersHtml: renderSiteDeadlineBannersHtml(deadlineBanners),
+    publicRead: { site, sponsors: chrome.sponsors || [], photos: [], deadlineBanners, square: null },
+  }));
+}
+
 async function renderNewsPublicPage(request, env, url, ctx, itemId = 0) {
   const today = easternTodayIso();
   const chrome = await loadPublicChromeReads(env, today, ctx);
@@ -15315,7 +15330,7 @@ ${marqueeHtml}
 ${deadlineHtml}
 ${newsStripHtml}
 <main id="main">${bodyHtml}</main>
-<footer class="footer"><div class="wrap"><div>${renderSocialLinks(site)}<h3 data-site-field="title">${formatInlineRichText(site.title)}</h3><div class="footer-note" data-site-field="footer_note">${formatRichText(site.footer_note)}</div><small>School colors and imagery sourced from East Forsyth High School assets provided with permission.</small></div><div><h3>Program</h3>${footerPages.slice(1,4).map((p) => `<a href="${escapeAttr(p.path)}">${escapeHtml(p.title)}</a>`).join('')}</div><div><h3>Families</h3>${footerPages.slice(4,7).map((p) => `<a href="${escapeAttr(p.path)}">${escapeHtml(p.title)}</a>`).join('')}</div><div><h3>Community</h3><a href="/sponsors.html">Sponsors</a><a href="/become-a-sponsor.html" data-sponsor-choice-open>Sponsor/In-Kind</a><a href="/contact.html">Contact</a><a href="https://www.wsfcs.k12.nc.us/o/efhs">EFHS Website</a></div></div><p class="footer-disclaimer">East Forsyth Band Boosters is an independent 501(c)(3) nonprofit organization and is not affiliated with or endorsed by East Forsyth High School or Winston-Salem/Forsyth County Schools.</p></footer>
+<footer class="footer"><div class="wrap"><div>${renderSocialLinks(site)}<h3 data-site-field="title">${formatInlineRichText(site.title)}</h3><div class="footer-note" data-site-field="footer_note">${formatRichText(site.footer_note)}</div><small>School colors and imagery sourced from East Forsyth High School assets provided with permission.</small></div><div><h3>Program</h3>${footerPages.slice(1,4).map((p) => `<a href="${escapeAttr(p.path)}">${escapeHtml(p.title)}</a>`).join('')}</div><div><h3>Families</h3>${footerPages.slice(4,7).map((p) => `<a href="${escapeAttr(p.path)}">${escapeHtml(p.title)}</a>`).join('')}</div><div><h3>Community</h3><a href="/sponsors.html">Sponsors</a><a href="/become-a-sponsor.html" data-sponsor-choice-open>Sponsor/In-Kind</a><a href="/contact.html">Contact</a><a href="https://www.wsfcs.k12.nc.us/o/efhs">EFHS Website</a><a href="/sitemap.html">Site Map</a></div></div><p class="footer-disclaimer">East Forsyth Band Boosters is an independent 501(c)(3) nonprofit organization and is not affiliated with or endorsed by East Forsyth High School or Winston-Salem/Forsyth County Schools.</p></footer>
 ${publicRead ? renderPublicReadBootstrap(publicRead) : ''}
 <script src="/script.js?v=${ASSET_VERSION}"></script><script src="/site-content.js?v=${ASSET_VERSION}"></script>${halloweenBatLockScript()}${page.slug === 'calendar' ? `<script src="/caldev.js?v=${ASSET_VERSION}"></script>` : ''}
 </body></html>`;
@@ -15892,6 +15907,9 @@ async function dispatchWorker(request, env, ctx) {
     }
     if (url.pathname === '/caldev' || url.pathname === '/caldev/' || url.pathname === '/caldev.html') {
       return Response.redirect(new URL('/calendar.html', url.origin).toString(), 302);
+    }
+    if ((request.method === 'GET' || request.method === 'HEAD') && (url.pathname === '/sitemap.html' || url.pathname === '/sitemap')) {
+      return renderSitemapPublicPage(request, env, url, ctx);
     }
     if ((request.method === 'GET' || request.method === 'HEAD') && (url.pathname === '/news' || url.pathname === '/news/' || /^\/news\/\d+$/.test(url.pathname))) {
       return renderNewsPublicPage(request, env, url, ctx, Number(url.pathname.split('/')[2] || 0));
