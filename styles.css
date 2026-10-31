@@ -6727,4 +6727,7 @@ html body:not(.admin-body) .sponsor-marquee-section.is-ticker-away{transform:tra
 .news-tab.is-open{background:#f2c200;color:#0b2a5b;border-color:#0b2a5b}
 .news-tab.is-bouncing{animation:news-tab-bounce .7s ease-in-out .6s 2}
 @keyframes news-tab-bounce{0%,100%{transform:translateX(0)}40%{transform:translateX(10px)}70%{transform:translateX(-2px)}}
-@media (prefers-reduced-motion:reduce){.news-strip.is-tuckable{transition:none}.news-tab.is-bouncing{animation:none}}
+@media (prefers-reduced-motion:reduce){.news-strip.is-tuckable{transition:none}.news-tab.is-bouncing{animation:none}}/* Sponsor popup sits above everything (News tab/strip, ticker, header); after it
+   closes a transparent tap-shield briefly eats the closing tap so nothing underneath navigates. */
+.sponsor-flyin{z-index:2147482000}
+.sponsor-flyin-shield{position:fixed;inset:0;z-index:2147483000;background:transparent;touch-action:none;-webkit-tap-highlight-color:transparent}

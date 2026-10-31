@@ -384,13 +384,46 @@ function sponsorPopupRecentlyClosed() {
   return Date.now() - sponsorPopupClosedAt < 600 || !!document.querySelector('.sponsor-flyin.is-leaving');
 }
 
-const SPONSOR_POPUP_DISMISSED_KEY = 'efhs-sponsor-popup-dismissed-v1';
-/** An explicit close (X or backdrop) silences sponsor popups for the rest of the browser session. */
+const SPONSOR_POPUP_DISMISSED_KEY = 'efhs-sponsor-popup-dismissed-v2';
+const SPONSOR_POPUP_LEGACY_KEY = 'efhs-sponsor-popup-dismissed-v1';
+/** A "visit" ends after 30 idle minutes, so a dismissal only lasts for that visit. */
+const SPONSOR_VISIT_IDLE_MS = 30 * 60 * 1000;
+/**
+ * Dismissals are stamped with the visit's last activity. sessionStorage alone
+ * outlives a visit (tab restore, mobile Safari tabs, hard refresh), which left
+ * returning browsers permanently silenced by the old '1' flag.
+ */
 function sponsorPopupDismissedForSession() {
-  try { return sessionStorage.getItem(SPONSOR_POPUP_DISMISSED_KEY) === '1'; } catch { return false; }
+  try {
+    sessionStorage.removeItem(SPONSOR_POPUP_LEGACY_KEY);
+    const raw = JSON.parse(sessionStorage.getItem(SPONSOR_POPUP_DISMISSED_KEY) || 'null');
+    const seen = Number(raw?.seen);
+    if (!Number.isFinite(seen) || Date.now() - seen > SPONSOR_VISIT_IDLE_MS || seen > Date.now() + 60000) {
+      sessionStorage.removeItem(SPONSOR_POPUP_DISMISSED_KEY);
+      return false;
+    }
+    sessionStorage.setItem(SPONSOR_POPUP_DISMISSED_KEY, JSON.stringify({ at: raw.at, seen: Date.now() }));
+    return true;
+  } catch { return false; }
 }
 function rememberSponsorPopupDismissed() {
-  try { sessionStorage.setItem(SPONSOR_POPUP_DISMISSED_KEY, '1'); } catch { /* storage unavailable */ }
+  try { sessionStorage.setItem(SPONSOR_POPUP_DISMISSED_KEY, JSON.stringify({ at: Date.now(), seen: Date.now() })); } catch { /* storage unavailable */ }
+}
+const SPONSOR_TAP_SHIELD_MS = 400;
+/** Transparent full-screen layer that eats the tap that closed the ad (and its ghost click). */
+function raiseSponsorTapShield(ms) {
+  if (typeof document === 'undefined' || !document.body) return;
+  let shield = document.querySelector('.sponsor-flyin-shield');
+  if (!shield) {
+    shield = document.createElement('div');
+    shield.className = 'sponsor-flyin-shield';
+    shield.setAttribute('aria-hidden', 'true');
+    const eat = (event) => { if (event.cancelable) event.preventDefault(); event.stopPropagation(); event.stopImmediatePropagation?.(); };
+    ['pointerdown', 'pointerup', 'touchstart', 'touchend', 'mousedown', 'mouseup', 'click'].forEach((type) => shield.addEventListener(type, eat, { passive: false, capture: true }));
+    document.body.appendChild(shield);
+  }
+  window.clearTimeout(Number(shield.dataset.timer || 0));
+  shield.dataset.timer = String(window.setTimeout(() => shield.remove(), ms));
 }
 if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
   // Back/forward cache restores: drop any popup that was frozen on screen.
@@ -410,6 +443,7 @@ function dismissSponsorAd(root) {
   const rect = { left: box.left, right: box.right, top: box.top, bottom: box.bottom };
   // Guard covers the whole fade plus the grace period after removal.
   sponsorFlyinGuard = { rect, until: Date.now() + SPONSOR_FLYIN_FADE_MS + SPONSOR_FLYIN_GUARD_MS };
+  raiseSponsorTapShield(SPONSOR_FLYIN_FADE_MS + SPONSOR_TAP_SHIELD_MS);
   root.classList.add('is-leaving');
   root.classList.remove('is-visible');
   document.body.classList.remove('sponsor-flyin-open');
@@ -501,6 +535,29 @@ function showHomepageSponsorAd(sponsor, durationSeconds = 6) {
     event.stopPropagation();
   });
 
+  // Rule: any tap on the ad (X, card, backdrop) only closes it - never navigates.
+  // Capture on the root so nothing underneath (News tab, ticker) gets the press.
+  ['pointerdown', 'touchstart', 'mousedown'].forEach((type) => {
+    root.addEventListener(type, (event) => {
+      if (event.cancelable) event.preventDefault();
+      event.stopPropagation();
+      markSponsorPopupClose();
+      if (type === 'pointerdown') pressingStart();
+    }, { passive: false, capture: true });
+  });
+  ['touchend', 'pointerup', 'click'].forEach((type) => {
+    root.addEventListener(type, (event) => {
+      if (event.cancelable) event.preventDefault();
+      event.stopPropagation();
+      if (type === 'pointerup' && event.pointerType === 'mouse') return; // mouse closes on click
+      rememberSponsorPopupDismissed();
+      dismissSponsorAd(root);
+    }, { passive: false, capture: true });
+  });
+  root.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') { rememberSponsorPopupDismissed(); dismissSponsorAd(root); }
+  });
+
   // Don't auto-hide while a finger or pointer is down on the popup.
   let pressing = false;
   let hideDue = false;
@@ -508,7 +565,7 @@ function showHomepageSponsorAd(sponsor, durationSeconds = 6) {
     pressing = false;
     if (hideDue && document.body.contains(root)) dismissSponsorAd(root);
   };
-  root.addEventListener('pointerdown', () => { pressing = true; });
+  function pressingStart() { pressing = true; }
   root.addEventListener('pointerup', release);
   root.addEventListener('pointercancel', release);
 
@@ -739,7 +796,7 @@ function ensurePublicBrandMark() {
     if (brand.querySelector('img.brand-mark')) return;
     const mark = document.createElement('img');
     mark.className = 'brand-mark';
-    mark.src = '/assets/efhs-blue-regiment-mark.png?v=cms-p2-20261031r';
+    mark.src = '/assets/efhs-blue-regiment-mark.png?v=cms-p2-20261031s';
     mark.alt = 'East Forsyth Blue Regiment';
     mark.width = 48;
     mark.height = 48;
@@ -1590,7 +1647,7 @@ function safePublicThemePhotoUrl(url = '') {
 function applyPublicThemePhotos(photos = []) {
   if (!document.body?.classList.contains('efhs-theme')) return;
   // Keep the pinned Home Game Performance (4) hero; gallery matching must not replace it.
-  const homeHero = '/assets/efhs-home-hero.jpg?v=cms-p2-20261031r';
+  const homeHero = '/assets/efhs-home-hero.jpg?v=cms-p2-20261031s';
   const root = document.documentElement;
   root.style.setProperty('--efhs-hero-photo', `url("${homeHero}")`);
   const currentPage = String(getComputedStyle(root).getPropertyValue('--efhs-page-photo') || '').trim();
