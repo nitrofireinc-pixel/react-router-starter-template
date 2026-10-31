@@ -523,7 +523,7 @@
       <div class="caldev-detail" role="dialog" aria-modal="true" aria-labelledby="caldev-detail-title">
         <div class="caldev-detail-backdrop" data-caldev-close></div>
         <div class="caldev-detail-panel">
-          <button type="button" class="sponsor-flyin-close" data-caldev-close aria-label="Close">×</button>
+          <button type="button" class="sponsor-flyin-close caldev-detail-close" data-caldev-close aria-label="Close event details" title="Close">×</button>
           ${trackChip(event.track)}
           <h3 id="caldev-detail-title"${event.cancelled_at ? ' class="is-cancelled"' : ''}><span class="caldev-t">${escapeHtml(event.title)}</span>${cancelledTag(event)}</h3>
           <p class="caldev-detail-when">${escapeHtml(formatSpanWhen(event))}</p>

@@ -6733,3 +6733,7 @@ html body:not(.admin-body) .sponsor-marquee-section.is-ticker-away{transform:tra
    closes a transparent tap-shield briefly eats the closing tap so nothing underneath navigates. */
 .sponsor-flyin{z-index:2147482000}
 .sponsor-flyin-shield{position:fixed;inset:0;z-index:2147483000;background:transparent;touch-action:none;-webkit-tap-highlight-color:transparent}
+/* Calendar event detail (white panel, incl. ?event= deep links): visible 44px X */
+.caldev-detail-panel{padding-right:64px}
+.caldev-detail-panel .caldev-detail-close{position:absolute;top:10px;right:10px;width:44px;height:44px;min-width:44px;min-height:44px;display:grid;place-items:center;padding:0;border:1px solid rgba(0,33,66,.18);border-radius:999px;background:#eef3f8;color:#002142;font-size:1.6rem;line-height:1;cursor:pointer;z-index:3}
+.caldev-detail-panel .caldev-detail-close:hover,.caldev-detail-panel .caldev-detail-close:focus-visible{background:#dbe5f0;outline:2px solid #002142;outline-offset:2px}
