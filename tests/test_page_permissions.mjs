@@ -365,7 +365,7 @@ test('server sidebar hide uses allow(); content-only users keep Minutes visible'
   const html = renderAdminSidebarHtml('test', { user: jamie, allow });
   assert.match(html, /data-tab="dashboard"/);
   assert.match(html, /data-tab="minutes"/);
-  assert.match(html, /data-tab="users"/);
+  assert.doesNotMatch(html, /data-tab="users"/); // plan 2.30: Users (classic) removed from menu
   assert.doesNotMatch(html, /data-tab="security-log"/);
   assert.doesNotMatch(html, /data-tab="ledger"/);
   assert.equal(allow('minutes'), true);

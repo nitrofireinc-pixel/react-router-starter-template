@@ -3283,8 +3283,6 @@ test('push service worker and web app manifest assets exist', () => {
   assert.match(adminJs, /securityLogPageSize: 25/);
   assert.match(adminJs, /security-log-month/);
   assert.match(adminJs, /security-log/);
-  assert.match(adminJs, /tab', 'security'/);
-  assert.match(adminJs, /Always pin Security Log/);
   assert.match(adminJs, /Security log is Super Admin only/);
   assert.doesNotMatch(adminJs, /minutes-view-modal/);
   assert.match(styles, /\.user-admin-row \.user-last-login/);
@@ -3505,7 +3503,6 @@ test('Treasurer Ledger CMS feature is restored with permissions, XML/Excel expor
   assert.match(adminJs, /function canAccessLedger/);
   assert.match(adminJs, /async function loadLedger/);
   assert.match(adminJs, /ledger: canAccessLedger\(\)/);
-  assert.match(adminJs, /'Ledger', 'Record donors, sponsors, fundraisers, dues, and expenses/);
 
   const stylesSrc = readFileSync(join(root, 'styles.css'), 'utf8');
   assert.match(stylesSrc, /Treasurer ledger/);

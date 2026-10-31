@@ -1733,6 +1733,11 @@ function hideCalendarFinishedControls() {
 }
 
 function activateTab(name) {
+  // Plan 2.30: the old in-page Schedule Board is retired; Calendar > Events replaces it.
+  if (name === 'caldev') {
+    window.location.assign('/admin/events-manager');
+    return Promise.resolve(false);
+  }
   if (!canOpenAdminTab(name)) {
     return Promise.resolve(false);
   }
@@ -2779,7 +2784,7 @@ async function renderStudioHome() {
   try {
     data = await jsonFetch('/api/admin/studio-home');
   } catch {
-    tilesEl.innerHTML = '<p class="sh-muted">Could not load the Studio home. Use All tools below.</p>';
+    tilesEl.innerHTML = '<p class="sh-muted">Could not load the Studio home. Use the menu.</p>';
     return;
   }
   tilesEl.innerHTML = (data.tiles || []).map((t) => {
@@ -2797,59 +2802,12 @@ async function renderStudioHome() {
 }
 
 function renderDashboard() {
-  const dashboard = document.querySelector('#dashboard-cards');
-  if (!dashboard) return;
-  const displayName = state.me.user.display_name || state.me.user.username;
+  // Plan 2.30: the old "All tools" card grid is gone; every tool lives in the menu.
   const welcome = document.querySelector('#dashboard-welcome');
-  if (welcome) welcome.textContent = `${studioGreeting()}, ${String(displayName).trim().split(/\s+/)[0]}`;
+  if (!welcome) return;
+  const displayName = state.me.user.display_name || state.me.user.username;
+  welcome.textContent = `${studioGreeting()}, ${String(displayName).trim().split(/\s+/)[0]}`;
   renderStudioHome();
-
-  const guideHref = `/api/admin/website-guide.pdf?v=website-guide-api-20260907`;
-  const cards = [
-    isSuperAdmin() && ['Website Guide', 'Super Admin only — comprehensive CMS operations guide (PDF): roles, permissions, pages, and Security Log.', guideHref, 'Documentation', 'link', 'docs'],
-    canAccessCheckout() && ['Checkout', 'Charge a card through Square for an item and amount.', 'checkout', 'Payments', 'tab', 'money'],
-    ['Staff Email', 'Send rich-text emails with attachments to CMS users.', 'mail', 'Administration', 'tab'],
-    canManageMinutes() && ['Meeting Minutes', 'Add and review booster meeting minutes by date.', 'minutes', 'Boosters', 'tab'],
-    canViewMinutes() && !canManageMinutes() && ['Meeting Minutes', 'Open and print booster meeting minutes by date.', 'minutes', 'Boosters', 'tab'],
-    canEditSponsors() && ['Manage sponsors', 'Add, edit, reorder, or remove sponsor businesses and logos.', 'sponsors', 'Community', 'tab'],
-    canAccessLedger() && ['Ledger', 'Record donors, sponsors, fundraisers, dues, and expenses; view and download Excel.', 'ledger', 'Finance', 'tab'],
-    state.pages.some((page) => page.slug === 'sponsors' && canEditPage(page)) && ['Sponsors page', 'Edit the public Sponsors page header, intro, and callout copy.', 'sponsors', 'Community', 'page'],
-    state.pages.some((page) => page.slug === 'become-a-sponsor' && canEditPage(page)) && ['Become a Sponsor', 'Edit package cards and the inquiry form on the Become a Sponsor page.', 'become-a-sponsor', 'Community', 'page'],
-    canEditStaff() && ['Directors & Staff', 'Add staff photos, names, roles, and short descriptions.', 'staff', 'People', 'tab'],
-    canEditPage('ensembles') && ['Ensemble Body', 'Edit ensemble cards and body copy in a floating editor.', 'ensembles', 'Program', 'tab'],
-    canEditBoosterMembers() && ['Booster Members', 'Add booster officer photos, names, roles, and short descriptions.', 'booster-members', 'Families', 'tab'],
-    canAccessBadgeCreator() && ['Badge Creator', 'Build, save, download, and print CR80 committee and officer badges.', 'badge-creator', 'Boosters', 'tab'],
-    canEditContact() && ['Contact Form', 'Assign CMS users to contact topics (multiple recipients allowed).', 'contact', 'Connect', 'tab'],
-    canAccessForms() && ['Forms', 'Build public forms, choose who can open the builder, and pick who receives completed PDFs.', 'forms', 'Manage', 'tab'],
-    hasPermission('users') && ['User Management', 'Create editor accounts and assign page-level permissions.', 'users', 'Administration', 'tab'],
-    hasPermission('site') && ['Social Media', 'Add account links, connect Instagram gallery auto-post, or publish to Facebook.', 'social', 'Social', 'tab'],
-    canAccessScheduleBoard() && ['Schedule Board', 'Add and edit events for the public Calendar.', 'caldev', 'Program', 'tab', 'caldev'],
-  ].filter(Boolean);
-  // Always pin Security Log after every other dashboard card (now and for future additions).
-  if (isSuperAdmin()) {
-    cards.push(['Security Log', 'View and print the sealed audit vault. Super Admin only — cannot be edited or granted to others.', 'security-log', 'Security', 'tab', 'security']);
-  }
-
-  dashboard.innerHTML = cards.length
-    ? cards.map((card) => {
-      const [title, copy, target, kicker, kind, theme = ''] = card;
-      const themeClass = theme ? ` dash-card-${escapeAttr(theme)}` : '';
-      if (kind === 'link') {
-        const downloadName = String(target).includes('website-guide')
-          ? 'EFHS-Band-Website-CMS-Guide-Super-Admin.pdf'
-          : 'EFHS-Band-Website-CMS-Guide.pdf';
-        return `<a class="dash-card${themeClass}" href="${escapeAttr(target)}" download="${escapeAttr(downloadName)}"><span>${escapeHtml(kicker)}</span><b>${escapeHtml(title)}</b><small>${escapeHtml(copy)}</small></a>`;
-      }
-      const attr = kind === 'page' ? `data-dash-page="${escapeAttr(target)}"` : `data-dash-target="${escapeAttr(target)}"`;
-      return `<button class="dash-card${themeClass}" type="button" ${attr}><span>${escapeHtml(kicker)}</span><b>${escapeHtml(title)}</b><small>${escapeHtml(copy)}</small></button>`;
-    }).join('')
-    : '<p class="draft dashboard-empty">No dashboard tools are available for your account. Use Manage in the left navigation when permissions are assigned.</p>';
-  dashboard.querySelectorAll('[data-dash-target]').forEach(button => button.addEventListener('click', () => {
-    activateTab(button.dataset.dashTarget);
-  }));
-  dashboard.querySelectorAll('[data-dash-page]').forEach(button => button.addEventListener('click', () => {
-    editPage(button.dataset.dashPage);
-  }));
 }
 
 function editPage(slug, { skipGuard = false } = {}) {

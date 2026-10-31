@@ -59,5 +59,5 @@ test('admin shell loads home assets with admin-only version; public assets untou
   const src = readFileSync(new URL('../worker/src/worker.mjs', import.meta.url), 'utf8');
   assert.match(src, /admin-home\.css\?v=\$\{ADMIN_HOME_VERSION\}/);
   assert.match(src, /id="sh-tiles"/);
-  assert.match(src, /id="dashboard-cards"/); // All tools kept
+  assert.doesNotMatch(src, /id="dashboard-cards"|<h2>All tools<\/h2>/); // plan 2.30: All tools grid removed
 });

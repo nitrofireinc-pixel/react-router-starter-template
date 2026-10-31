@@ -28,9 +28,9 @@ test('CMS Website Guide ships as a real PDF download', () => {
   assert.equal(pdf.subarray(0, 5).toString('utf8'), '%PDF-');
   assert.ok(pdf.byteLength > 50_000, 'PDF looks too small');
 
-  const admin = readFileSync(join(ROOT, 'admin.js'), 'utf8');
+  const admin = readFileSync(join(ROOT, 'worker/src/admin-chrome.mjs'), 'utf8');
   assert.match(admin, /\/api\/admin\/website-guide\.pdf/);
-  assert.match(admin, /isSuperAdmin\(\) && \['Website Guide'/);
+  assert.match(readFileSync(new URL('../worker/src/admin-chrome.mjs', import.meta.url), 'utf8'), /Website Guide \(PDF\)/); // plan 2.30: Account menu
   assert.match(admin, /website-guide-api-20260907/);
 
   const worker = readFileSync(join(ROOT, 'worker/src/worker.mjs'), 'utf8');

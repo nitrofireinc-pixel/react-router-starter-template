@@ -198,7 +198,6 @@ export function buildAdminNavModel(options = {}) {
           attrs: 'data-nav-href="/admin/forms-builder#/subs"',
           keywords: 'responses submissions',
         }),
-        item('forms', 'Older forms', 'forms', tabHref('forms')),
         item('mail', 'Staff Email', 'mail', tabHref('mail'), { keywords: 'email' }),
         item('contact', 'Contact Form', 'contact', tabHref('contact')),
       ],
@@ -210,7 +209,6 @@ export function buildAdminNavModel(options = {}) {
       adminOnly: true,
       items: [
         item('people', 'People & Access', '', '/admin/people', { perm: 'people', admin: true, attrs: 'data-nav-href="/admin/people"', keywords: 'people users staff boosters roles permissions lock unlock login access directors committee' }),
-        item('users', 'Users (classic)', 'users', tabHref('users'), { admin: true, keywords: 'people permissions' }),
         item('site', 'Site Settings', 'site', tabHref('site'), { admin: true }),
         item('security-log', 'Security Log', 'security-log', tabHref('security-log'), { admin: true }),
       ],
@@ -431,6 +429,10 @@ export function renderAdminSidebarHtml(assetVersion = 'dev', options = {}) {
   const userBlock = displayName
     ? `<div id="current-user" class="admin-user sn-user"><span class="sn-avatar" aria-hidden="true">${escapeAdminHtml(initials(user.display_name || user.username))}</span><div class="admin-user-row"><b>${displayName}</b>${roleLabel ? `<span class="admin-role-pill">${roleLabel}</span>` : ''}</div></div>`
     : '<div id="current-user" class="admin-user sn-user"></div>';
+  // Plan 2.30: Website Guide lives in the Account menu, Super Admin only (server also 403s everyone else).
+  const guideLink = String(user.role || '').trim().toLowerCase() === 'admin'
+    ? '<a class="admin-website-guide" data-website-guide href="/api/admin/website-guide.pdf?v=website-guide-api-20260907" download="EFHS-Band-Website-CMS-Guide-Super-Admin.pdf">Website Guide (PDF)</a>'
+    : '';
   const pageIndex = model.pageIndex.length
     ? `<div class="sn-page-index" data-sn-pages hidden>${model.pageIndex.map((page) => `<a href="${escapeAdminHtml(page.href)}" data-sn-page="${escapeAdminHtml(page.slug)}">${escapeAdminHtml(page.label)}</a>`).join('')}</div>`
     : '';
@@ -450,7 +452,7 @@ ${model.sections.map((section) => renderSection(section, model.currentKey, model
 ${pageIndex}
 <div class="admin-sidebar-footer sn-foot">
 ${userBlock}
-<div class="sn-foot-actions"><button type="button" class="admin-change-password" data-open-password>Change password</button>
+${guideLink}<div class="sn-foot-actions"><button type="button" class="admin-change-password" data-open-password>Change password</button>
 <form id="admin-logout-form" class="admin-logout-form" method="post" action="/admin/logout">
 <button class="admin-logout" type="submit">Log out</button>
 </form></div>
