@@ -611,7 +611,7 @@ const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-export const ASSET_VERSION = 'cms-p2-20261031zn';
+export const ASSET_VERSION = 'cms-p2-20261031zo';
 // Admin-only assets (Studio home). Bumping this never changes public page bytes.
 export const ADMIN_HOME_VERSION = `${ASSET_VERSION}-home5`;
 /** Admin-only cache key for the 14c sidebar + launcher (public pages keep ASSET_VERSION). */
@@ -11220,7 +11220,7 @@ async function routeApi(request, env, url, ctx = null) {
       page_size: pageSize,
       total_pages: totalPages,
       storage: 'encrypted-server-database',
-      access: 'super_admin_only',
+      access: canManageSecurityLog(auth.user) ? 'super_admin_full' : 'admin_view_only',
       mode: 'view_print_only',
       editable: false,
     });
@@ -12272,7 +12272,7 @@ async function routeApi(request, env, url, ctx = null) {
     const extra = new Map();
     try {
       const rows = await env.DB.prepare(
-        'SELECT p.slug AS slug, p.editor AS editor, d.updated_at AS draft_updated_at FROM cms_pages p LEFT JOIN page_drafts d ON d.slug = p.slug',
+        'SELECT p.slug AS slug, p.editor AS editor, d.updated_at AS draft_updated_at, CASE WHEN d.slug IS NULL THEN 0 WHEN v.id IS NULL THEN 1 WHEN d.layout_json IS v.layout_json THEN 0 ELSE 1 END AS draft_differs FROM cms_pages p LEFT JOIN page_drafts d ON d.slug = p.slug LEFT JOIN page_versions v ON v.id = p.live_version_id',
       ).all();
       for (const row of rows.results || []) extra.set(row.slug, row);
     } catch { /* older schema: no flags */ }
@@ -12282,7 +12282,7 @@ async function routeApi(request, env, url, ctx = null) {
       return {
         ...page,
         editor: row.editor || 'legacy',
-        has_draft: Boolean(row.draft_updated_at),
+        has_draft: Boolean(row.draft_updated_at) && Number(row.draft_differs ?? 1) === 1,
         draft_updated_at: row.draft_updated_at || null,
         can_manage: canManage,
         protected: isProtectedCmsPage(page),
@@ -16008,7 +16008,7 @@ async function dispatchWorker(request, env, ctx) {
       if (/^[a-z0-9-]+$/.test(slug) && !CLASSIC_EDITOR_SLUGS.has(slug)) return redirect(classicPageRedirectTarget(slug));
     }
     // Trevor: the calendar opens Events. The old Schedule Board tab URL now goes to the Events manager.
-    if (url.pathname === '/admin' && url.searchParams.get('tab') === 'caldev') return Response.redirect(new URL('/admin/events-manager', url).toString(), 302);
+    if (url.pathname === '/admin' && ['caldev', 'schedule', 'schedule-board'].includes(url.searchParams.get('tab'))) return Response.redirect(new URL('/admin/events-manager', url).toString(), 302);
     if (url.pathname === '/admin') return handleAdmin(request, env, ctx);
     if (url.pathname === '/admin/news' || url.pathname === '/admin/news/') return handleNewsAdminPage(request, env);
     if (url.pathname === '/admin/fundraiser-cards' || url.pathname === '/admin/fundraiser-cards/') {
@@ -16635,7 +16635,7 @@ __ADMIN_SIDEBAR__
 </form>
 </div>
 </section>
-<section id="tab-caldev" class="cms-panel" hidden><div class="panel-head"><div><p class="kicker">Program</p><h1>Schedule Board</h1><p>Add and edit events for the public Calendar. Single-click selects, double-click opens the Create/Edit toast, drag (or press-and-hold then drag on mobile) reschedules. Day <b>+</b> adds an event. Events with What set to <b>Meetings</b> also appear on the Boosters page. Public calendar is <code>/calendar.html</code>.</p><p><a class="btn outline" href="/admin/events-manager">📅 Open the full-page event manager</a></p></div><div class="panel-actions"><button class="btn primary" type="button" id="caldev-finished-top">Finished</button></div></div><div id="cms-caldev-board" class="cms-caldev-mount" aria-live="polite"></div></section><section id="tab-security-log" class="cms-panel security-log-panel" hidden><div class="panel-head"><div><p class="kicker">Security</p><h1>Security Audit Log</h1><p>Super Admin: full access. Admin: view only. Month/year defaults to the current Eastern month. 25 entries per page, newest first. Download PDF for the selected month. This log cannot be edited or deleted, and access cannot be granted to other users.</p></div><div class="panel-actions"><a class="btn outline" id="download-security-log" href="/api/admin/security-log.pdf">Download month PDF</a><a class="btn outline" id="download-security-log-csv" href="/api/admin/security-log.csv">Download CSV</a><a class="btn outline" id="download-security-log-json" href="/api/admin/security-log.json">Download JSON</a><button class="btn outline" type="button" id="verify-security-log">Verify integrity</button><button class="btn outline" type="button" id="refresh-security-log">Refresh</button></div></div>
+<section id="tab-security-log" class="cms-panel security-log-panel" hidden><div class="panel-head"><div><p class="kicker">Security</p><h1>Security Audit Log</h1><p>Super Admin: full access. Admin: view only. Month/year defaults to the current Eastern month. 25 entries per page, newest first. Download PDF for the selected month. This log cannot be edited or deleted, and access cannot be granted to other users.</p></div><div class="panel-actions"><a class="btn outline" id="download-security-log" href="/api/admin/security-log.pdf">Download month PDF</a><a class="btn outline" id="download-security-log-csv" href="/api/admin/security-log.csv">Download CSV</a><a class="btn outline" id="download-security-log-json" href="/api/admin/security-log.json">Download JSON</a><button class="btn outline" type="button" id="verify-security-log">Verify integrity</button><button class="btn outline" type="button" id="refresh-security-log">Refresh</button></div></div>
 <div id="security-log-court" class="security-log-court" hidden></div>
 <div class="admin-card security-log-filters">
   <div class="form-grid security-log-filter-grid">

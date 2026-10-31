@@ -1488,7 +1488,7 @@ test('CMS View Site stays in the same window and Schedule Board uses What', () =
   const siteContent = readFileSync(join(root, 'site-content.js'), 'utf8');
   assert.match(workerSrc, /<a class="btn primary" href="\/">View Site<\/a>/);
   assert.doesNotMatch(workerSrc, /href="\/" target="_blank" rel="noreferrer">View Site/);
-  assert.match(workerSrc, /Events with What set to <b>Meetings<\/b>/);
+  assert.doesNotMatch(workerSrc, /Events with What set to <b>Meetings<\/b>/); // Schedule Board panel retired (2.30)
   assert.match(adminCaldev, /<label>What/);
   assert.doesNotMatch(adminCaldev, /<label>Who/);
   assert.match(adminCaldev, /What → Meetings/);

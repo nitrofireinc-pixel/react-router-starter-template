@@ -25,3 +25,8 @@ test('Security Log: Super Admin full, Admin view-only, nobody else', () => {
   assert.equal(W.canAccessSecurityLog(ed), false); assert.equal(W.hasPermission(ed, 'security-log'), false);
   assert.equal((w.match(/requireSecurityLogAccess\(request, env, \{ manage: true/g) || []).length, 7);
 });
+test('Pages list Draft only when draft differs from live; schedule tab redirects; Schedule Board panel gone', () => {
+  assert.match(w, /draft_differs/); assert.match(w, /d\.layout_json IS v\.layout_json/);
+  assert.match(w, /\['caldev', 'schedule', 'schedule-board'\]\.includes\(url\.searchParams\.get\('tab'\)\)\) return Response\.redirect\(new URL\('\/admin\/events-manager'/);
+  assert.doesNotMatch(w, /<h1>Schedule Board<\/h1>/); assert.doesNotMatch(w, /id="tab-caldev"/);
+});

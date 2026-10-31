@@ -107,7 +107,7 @@ test('blocked link drops its closing tag too (News + Schedule Board)', async () 
 });
 test('old Schedule Board URL redirects to Events; News Link button matches B/I/U size', async () => {
   const { readFileSync } = await import('node:fs');
-  assert.match(readFileSync(new URL('../worker/src/worker.mjs', import.meta.url), 'utf8'), /tab'\) === 'caldev'\) return Response\.redirect\(new URL\('\/admin\/events-manager'/);
+  assert.match(readFileSync(new URL('../worker/src/worker.mjs', import.meta.url), 'utf8'), /\['caldev', 'schedule', 'schedule-board'\]\.includes\(url\.searchParams\.get\('tab'\)\)\) return Response\.redirect\(new URL\('\/admin\/events-manager'/);
   assert.doesNotMatch(readFileSync(new URL('../admin-events.js', import.meta.url), 'utf8'), /href="\/admin\?tab=caldev"/);
   assert.doesNotMatch(renderNewsAdminHtml('v'), /data-cms-caldev-desc-link/);
 });

@@ -1746,7 +1746,7 @@ function hideCalendarFinishedControls() {
 
 function activateTab(name) {
   // Plan 2.30: the old in-page Schedule Board is retired; Calendar > Events replaces it.
-  if (name === 'caldev') {
+  if (name === 'caldev' || name === 'schedule' || name === 'schedule-board') {
     window.location.assign('/admin/events-manager');
     return Promise.resolve(false);
   }
