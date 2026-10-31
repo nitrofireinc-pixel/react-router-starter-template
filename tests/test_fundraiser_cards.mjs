@@ -229,7 +229,7 @@ function createCardStore(seed = {}) {
 
 test('schema, audit actions, DEV cron, and CMS shortcut are wired', () => {
   assert.equal(DB_SCHEMA_VERSION, '2026-10-04.8');
-  assert.match(workerSrc, /ASSET_VERSION = 'cms-p2-20261031u'/);
+  assert.match(workerSrc, /ASSET_VERSION = 'cms-p2-20261031v'/);
   const cardsAdmin = renderFundraiserCardsAdminHtml('test');
   assert.match(cardsAdmin, /class="admin-shell cms-shell image-admin-shell"/);
   assert.match(cardsAdmin, /class="admin-workspace"/);
@@ -762,4 +762,16 @@ test('public fundraiser cards take date/time/place live from the linked calendar
   assert.match(sql, /THEN e\.start_date ELSE c\.event_date END AS event_date/);
   assert.match(sql, /COALESCE\(e\.start_time, ''\) ELSE c\.start_time END AS start_time/);
   assert.match(sql, /COALESCE\(NULLIF\(e\.location, ''\), c\.location\) AS location/);
+});
+
+test('admin preview of a linked card uses live calendar values', async () => {
+  const { fundraiserPreviewPayload } = await import('../worker/src/worker.mjs');
+  const p = fundraiserPreviewPayload({ event_date: '2026-11-14', location: 'Gym', preview_event_date: '2026-12-07', preview_start_time: '', preview_end_time: '', preview_location: '' });
+  assert.equal(p.event_date, '2026-12-07');
+  assert.equal(p.location, 'Gym');
+  assert.equal(fundraiserPreviewPayload({ event_date: '2026-11-14' }).event_date, '2026-11-14');
+  const js = readFileSync(new URL('../admin-fundraiser-cards.js', import.meta.url), 'utf8');
+  assert.match(js, /class="fc-title-link" data-fc-open=/);
+  assert.match(js, /if \(seq !== previewSeq\) return;/);
+  assert.match(js, /card\?\.live_event_date \|\| card\?\.event_date/);
 });

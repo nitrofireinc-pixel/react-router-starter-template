@@ -39,7 +39,7 @@
     if (card.picture_mode === 'image' && card.image_url) {
       return `<div class="fc-thumb"><img src="${escapeAttr(card.image_url)}" alt=""></div>`;
     }
-    const match = String(card.event_date || '').match(/^\d{4}-(\d{2})-(\d{2})$/);
+    const match = liveDate(card).match(/^\d{4}-(\d{2})-(\d{2})$/);
     const months = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
     const label = match ? `${months[Number(match[1]) - 1] || ''} ${Number(match[2])}` : 'SOON';
     return `<div class="fc-tile">${escapeHtml(label)}</div>`;
@@ -64,8 +64,10 @@
     return `${months[Number(match[2]) - 1] || ''} ${Number(match[3])}, ${match[1]}`;
   }
 
+  /** Linked cards show the calendar's live values, same as the public card. */
+  function liveDate(card) { return String(card?.live_event_date || card?.event_date || ''); }
   function spanText(card) {
-    const start = String(card?.event_date || '');
+    const start = liveDate(card);
     const end = String(card?.span_end || '');
     if (!prettyDate(start) || !prettyDate(end) || end <= start) return '';
     return `${prettyDate(start)} – ${prettyDate(end)}`;
@@ -76,8 +78,8 @@
       <span class="fc-drag" aria-hidden="true">${reject ? '' : '⋮⋮'}</span>
       ${thumb(card)}
       <div class="fc-card-copy">
-        <strong>${escapeHtml(card.title)}</strong>
-        <small>${escapeHtml(spanText(card) || card.event_date || 'No date')}</small>
+        <strong><button type="button" class="fc-title-link" data-fc-open="${card.id}">${escapeHtml(card.title)}</button></strong>
+        <small>${escapeHtml(spanText(card) || prettyDate(liveDate(card)) || liveDate(card) || 'No date')}</small>
         <div class="fc-pills">${pillFor(card)}</div>
       </div>
       <div class="fc-row-actions">
@@ -173,9 +175,9 @@
       spanNote.className = 'fc-editor-note';
       field('event_date').closest('.fc-grid-2')?.after(spanNote);
     }
-    const range = spanText(card);
+    const range = spanText(card) || (card.live_event_date ? prettyDate(card.live_event_date) : '');
     spanNote.hidden = !range;
-    spanNote.textContent = range ? `Shows ${range}` : '';
+    spanNote.textContent = range ? `Shows ${range}${card.live_event_date ? ' (from the calendar)' : ''}` : '';
     field('location').value = card.location || '';
     field('start_time').value = card.start_time || '';
     field('end_time').value = card.end_time || '';
@@ -217,11 +219,15 @@
 
   function formPayload() {
     const picture = editor.querySelector('[name="picture_mode"]:checked')?.value || 'date_tile';
+    const current = cards.find((item) => Number(item.id) === Number(field('id').value)) || {};
+    const live = Boolean(current.live_event_date);
     return {
       title: field('title').value,
       description: field('description').value,
       event_date: field('event_date').value,
-      span_end: cards.find((item) => Number(item.id) === Number(field('id').value))?.span_end || '',
+      span_end: current.span_end || '',
+      // Preview mirrors the public card: linked cards use the calendar's date/times.
+      ...(live ? { preview_event_date: current.live_event_date, preview_start_time: current.live_start_time || '', preview_end_time: current.live_end_time || '', preview_location: current.live_location || '' } : {}),
       location: field('location').value,
       start_time: field('start_time').value,
       end_time: field('end_time').value,
@@ -237,12 +243,17 @@
     };
   }
 
+  let previewSeq = 0;
   async function refreshPreview() {
     if (!preview) return;
+    clearTimeout(previewTimer);
+    const seq = ++previewSeq;
     try {
       const data = await api('/api/admin/fundraiser-cards/preview', { method: 'POST', body: formPayload() });
+      if (seq !== previewSeq) return; // a newer selection/edit owns the preview
       preview.innerHTML = data.html || '<p class="fc-preview-empty">Nothing to preview yet.</p>';
     } catch {
+      if (seq !== previewSeq) return;
       preview.innerHTML = '<p class="fc-preview-empty">Preview unavailable.</p>';
     }
   }

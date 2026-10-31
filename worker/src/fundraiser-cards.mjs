@@ -469,7 +469,7 @@ async function applyFundraiserSpanEnds(env, cards = []) {
   let events = [];
   try {
     const result = await env.DB.prepare(`
-      SELECT id, start_date, end_date, series_id, cancelled_at
+      SELECT id, start_date, end_date, start_time, end_time, location, series_id, cancelled_at
       FROM caldev_events
       WHERE start_date != ''
     `).all();
@@ -491,10 +491,15 @@ async function applyFundraiserSpanEnds(env, cards = []) {
       card.span_end = card.span_end || '';
       continue;
     }
+    // Live calendar values (what the public card shows); saved values stay as fallback.
+    card.live_event_date = String(event.start_date || '');
+    card.live_start_time = String(event.start_time || '');
+    card.live_end_time = String(event.end_time || '');
+    card.live_location = String(event.location || '');
     let end = spanEndOf(event);
     const seriesEnd = event.series_id ? seriesLast.get(Number(event.series_id)) : '';
     if (seriesEnd && (!end || seriesEnd > end)) end = seriesEnd;
-    card.span_end = end && end > String(card.event_date || '') ? end : '';
+    card.span_end = end && end > String(card.live_event_date || card.event_date || '') ? end : '';
   }
   return cards;
 }
