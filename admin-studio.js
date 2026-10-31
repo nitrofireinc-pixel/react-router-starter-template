@@ -75,7 +75,12 @@
   const call = async (path, method, body, raw) => {
     const init = { method, credentials: 'same-origin' };
     if (raw) init.body = raw; else if (body) { init.headers = { 'content-type': 'application/json' }; init.body = JSON.stringify(body); }
-    const r = await fetch(path, init);
+    // Never hang forever: give up after 45 s so Publish/Save report an error instead.
+    const ctl = !raw && typeof AbortController === 'function' ? new AbortController() : null; // uploads (raw) may legitimately take longer
+    const kill = ctl ? setTimeout(() => ctl.abort(), 45000) : 0;
+    if (ctl) init.signal = ctl.signal;
+    let r;
+    try { r = await fetch(path, init); } catch (e) { throw new Error(e?.name === 'AbortError' ? 'The server took too long. Try again.' : (e?.message || 'Network error')); } finally { clearTimeout(kill); }
     const data = await r.json().catch(() => ({}));
     if (!r.ok) { const msg = (data.errors || []).slice(0, 2).join(' · ') || data.detail || `Error ${r.status}`; const e = new Error(msg); e.status = r.status; throw e; }
     return data;
@@ -257,7 +262,7 @@
   function afterJump(msg) { pseudo = new WeakMap(); if (selected && !findBlock(selected)) selected = null; scheduleRender(0); renderInspector(); renderJson(); scheduleSave(); updateChrome(); toast(msg); }
   function scheduleSave() { clearTimeout(saveTimer); saveTimer = setTimeout(saveDraft, 1200); updateChrome(); }
   async function saveDraft() {
-    clearTimeout(saveTimer); saving = true; updateChrome();
+    clearTimeout(saveTimer); saveTimer = 0; saving = true; updateChrome();
     const snap = snapshot();
     try {
       // Draft only. This endpoint never publishes.
@@ -275,7 +280,11 @@
     else if (saving || saveTimer && !lastSaved) t = 'Saving draft…';
     else if (dirty) t = `Unpublished changes · autosaved ${lastSaved ? ago(lastSaved) : 'earlier'}`;
     else t = 'Published · no unpublished changes';
-    pill.textContent = t;
+    const short = saveError ? 'Not saved' : (saving || saveTimer && !lastSaved) ? 'Saving…' : dirty ? 'Unpublished' : 'Published';
+    pill.innerHTML = '';
+    const full = document.createElement('span'); full.className = 'st-pill-full'; full.textContent = t;
+    const sh = document.createElement('span'); sh.className = 'st-pill-short'; sh.textContent = short;
+    pill.append(full, sh); pill.setAttribute('aria-label', t);
     pill.title = dirty ? 'Your changes are saved as a draft. Visitors see them only after you press Publish.' : 'The live page matches this draft.';
     const pub = $('[data-act="publish"]');
     pub.classList.toggle('has-changes', dirty);
@@ -1477,11 +1486,14 @@
     } catch (e) { toast(`Not discarded: ${e.message}`, true); }
   }
   async function publish() {
-    clearTimeout(saveTimer);
+    // saveTimer must be cleared too: a new page has no lastSaved, so a stale timer id
+    // left the pill on "Saving draft…" after the first Publish (Inspector flaw).
+    clearTimeout(saveTimer); saveTimer = 0;
     try {
       const pub = $('[data-act="publish"]'); pub.disabled = true; pub.textContent = 'Publishing…';
       await call(`${api}/publish`, 'POST', { layout });
-      await load(true); toast('Published. The live page is updated.');
+      lastSaved = Date.now(); saveError = '';
+      await load(true); updateChrome(); toast('Published. The live page is updated.');
     } catch (e) { toast(`Not published: ${e.message}`, true); updateChrome(); }
   }
   document.addEventListener('click', (e) => {

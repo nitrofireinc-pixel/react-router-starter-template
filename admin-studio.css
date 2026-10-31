@@ -239,3 +239,16 @@ a.st-exit.st-exit-pill:hover,a.st-exit.st-exit-pill:focus-visible{background:rgb
 @media (min-width:768px){
   header.st-top a.st-exit.st-exit-pill,header.ev-top a.st-exit.st-exit-pill{top:8px!important;padding:4px 12px!important;border:1px solid rgba(255,255,255,.25)!important;border-radius:999px!important;height:auto!important;line-height:18px!important;font-size:12px!important;font-weight:600!important}
 }
+
+/* Phones (<=600px): the top bar must fit - short status text, compact Exit pill, labelled Publish. */
+.st-pill-short{display:none}
+@media (max-width:600px){
+.st-top{gap:8px}
+.st-brand{flex:none}
+.st-top-right{flex:1 1 auto;min-width:0;justify-content:flex-end;gap:6px;overflow:hidden}
+.st-top-right .st-pill{flex:0 1 auto;min-width:0;max-width:none}
+.st-pill-full{display:none}.st-pill-short{display:inline}
+a.st-exit.st-exit-pill{flex:none;font-size:11.5px;padding:3px 9px;white-space:nowrap}
+.st-publish[data-state="clean"]{width:auto;padding:0 9px}
+.st-publish[data-state="clean"]::before{content:"✓ Published";font-size:12.5px}
+}

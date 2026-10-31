@@ -6744,3 +6744,7 @@ html body:not(.admin-body) .sponsor-marquee-section.is-ticker-away{transform:tra
 .sitemap-list a{display:block;padding:.8rem 1rem;border:1px solid rgba(0,32,91,.18);border-radius:10px;color:#00205b;font-weight:700;text-decoration:none;background:#fff;min-height:44px;box-sizing:border-box}
 .sitemap-list a:hover,.sitemap-list a:focus-visible{background:#00205b;color:#fff}
 @media (max-width:600px){.sitemap-list{grid-template-columns:1fr}}
+
+/* Trash: Delete forever */
+.page-purge-btn{color:#b00012!important;border-color:#e3a1a8!important}
+.page-purge-btn:hover{background:#fff0f1!important}

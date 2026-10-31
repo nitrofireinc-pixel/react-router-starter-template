@@ -1473,20 +1473,32 @@ async function saveCurrentPage({ reloadEditor = true } = {}) {
   const original = payload.original_slug;
   delete payload.original_slug;
   delete payload.body_html; // content is Studio-only; the server keeps the existing body
+  // New page with a blank slug: make it from the title (Inspector flaw, plan 2.30 pass).
+  if (!String(payload.slug || '').trim() && !original) {
+    const fromTitle = String(payload.title || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+    if (!fromTitle) {
+      if (status) status.textContent = 'Give the page a title (or a web address) before saving.';
+      window.alert('Give the page a title (or a web address) before saving.');
+      form.elements.title?.focus();
+      return false;
+    }
+    payload.slug = fromTitle;
+    if (form.elements.slug) form.elements.slug.value = fromTitle;
+  }
   const isHomeSave = original === 'home' || payload.slug === 'home';
   if (isHomeSave) payload.slug = 'home';
   if (status) status.textContent = 'Saving…';
   try {
-    await jsonFetch(original ? `/api/admin/pages/${original}` : '/api/admin/pages', {
+    const saved = await jsonFetch(original ? `/api/admin/pages/${original}` : '/api/admin/pages', {
       method: original ? 'PUT' : 'POST',
       body: JSON.stringify(payload),
     });
     await savePageSeoFields(form, payload.slug || original);
     // New pages get blocks (Form, Image, Text, Button...) in Studio, not in this classic form.
-    if (!original && !isHomeSave && payload.slug) {
+    if (!original && !isHomeSave && (saved?.slug || payload.slug)) {
       if (status) status.textContent = 'Page created. Opening Studio so you can add blocks…';
       capturePageBaseline();
-      window.location.assign(`/admin/studio/${encodeURIComponent(String(payload.slug).trim().toLowerCase())}?new=1`);
+      window.location.assign(`/admin/studio/${encodeURIComponent(String(saved?.slug || payload.slug).trim().toLowerCase())}?new=1`);
       return true;
     }
     if (status) status.textContent = 'Page saved. Public site updated.';
@@ -2012,7 +2024,16 @@ async function renderPageTrash() {
   let rows = [];
   try { rows = await jsonFetch('/api/admin/pages-trash'); } catch { rows = []; }
   card.hidden = !rows.length;
-  list.innerHTML = rows.map((r) => `<li class="page-list-row"><div class="page-list-main"><strong class="page-list-title">${escapeHtml(r.title || r.slug)}</strong><code class="page-list-slug">/${escapeHtml(r.slug)}</code><span class="page-list-chips"><span class="page-chip page-chip-off">Deleted ${escapeHtml(String(r.retired_at || '').slice(0, 10))}</span></span></div><div class="page-list-actions"><button class="btn outline small" type="button" data-page-restore="${escapeAttr(r.slug)}" data-page-label="${escapeAttr(r.title || r.slug)}">Restore</button></div></li>`).join('');
+  list.innerHTML = rows.map((r) => `<li class="page-list-row"><div class="page-list-main"><strong class="page-list-title">${escapeHtml(r.title || r.slug)}</strong><code class="page-list-slug">/${escapeHtml(r.slug)}</code><span class="page-list-chips"><span class="page-chip page-chip-off">Deleted ${escapeHtml(String(r.retired_at || '').slice(0, 10))}</span></span></div><div class="page-list-actions"><button class="btn outline small" type="button" data-page-restore="${escapeAttr(r.slug)}" data-page-label="${escapeAttr(r.title || r.slug)}">Restore</button>${r.protected ? '' : `<button class="btn outline small page-purge-btn" type="button" data-page-purge="${escapeAttr(r.slug)}" data-page-label="${escapeAttr(r.title || r.slug)}">Delete forever</button>`}</div></li>`).join('');
+  list.querySelectorAll('[data-page-purge]').forEach((button) => {
+    button.onclick = async () => {
+      const name = button.dataset.pageLabel;
+      const slug = button.dataset.pagePurge;
+      if (!window.confirm(`Delete "${name}" (/${slug}) forever? This removes the page and all its saved versions. It cannot be undone.`)) return;
+      try { await jsonFetch(`/api/admin/pages/${encodeURIComponent(slug)}/purge`, { method: 'POST', body: JSON.stringify({ confirm: slug }) }); await refreshAll(); }
+      catch (error) { window.alert(`Could not delete "${name}" forever: ${error.message}`); }
+    };
+  });
   list.querySelectorAll('[data-page-restore]').forEach((button) => {
     button.onclick = async () => {
       const name = button.dataset.pageLabel;
