@@ -1,6 +1,7 @@
 /** Approved home-page redesign. Markup follows the mockup; copy stays in the CMS or live data. */
 
 import { renderHeroCardHtml, SILENT_AUCTION_HELP_LINE } from './page-blocks.mjs';
+import { easternTodayIso } from './caldev.mjs';
 
 const HEART = '<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-7.5-4.6-9.6-9.3C.9 8.2 3 4.5 6.6 4.5c2.1 0 3.6 1.1 5.4 3 1.8-1.9 3.3-3 5.4-3 3.6 0 5.7 3.7 4.2 7.2C19.5 16.4 12 21 12 21z"/></svg>';
 const ARROW = '<svg class="ic arrow" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 7.25h9.2L8.1 4.15 9.15 3.1 14 8l-4.85 4.9-1.05-1.05L11.2 8.75H2z"/></svg>';
@@ -173,8 +174,29 @@ function eventWhere(event = {}) {
   return plainText(event.description);
 }
 
-export function selectHomeSchedule(events = []) {
-  const list = (Array.isArray(events) ? events : []).filter((event) => event && event.start_date);
+/** Strict event order: start date, then start time (all-day/empty first), then id. */
+export function compareEventsByStart(a = {}, b = {}) {
+  const da = String(a.start_date || a.event_date || '');
+  const db = String(b.start_date || b.event_date || '');
+  if (da !== db) return da < db ? -1 : 1;
+  const ta = String(a.start_time || '');
+  const tb = String(b.start_time || '');
+  if (ta !== tb) return ta < tb ? -1 : 1;
+  return (Number(a.id) || 0) - (Number(b.id) || 0);
+}
+
+/** Last day an event shows (inclusive): its end date if later than the start, else the start. */
+export function eventLastDay(event = {}) {
+  const start = String(event.start_date || '');
+  const end = String(event.end_date || '');
+  return end && end > start ? end : start;
+}
+
+export function selectHomeSchedule(events = [], { today = '' } = {}) {
+  const day = today || easternTodayIso();
+  const list = (Array.isArray(events) ? events : [])
+    .filter((event) => event && event.start_date && eventLastDay(event) >= day)
+    .slice().sort(compareEventsByStart);
   const fundraisers = list.filter(isHomeFundraiserEvent);
   const display = list.filter((event) => !isHomeRoutineRehearsal(event)).slice(0, 8);
   return { fundraisers, display, nextFundraiser: fundraisers[0] || null };
@@ -680,7 +702,7 @@ export function decorateFundraisingPage(html, data = {}) {
     cards = data.cards.map((card) => renderFundraisingCardFromCms(card)).filter(Boolean);
   } else {
     const media = extractFundraisingMedia(source);
-    const events = selectHomeSchedule(data.events || []).fundraisers;
+    const events = selectHomeSchedule(data.events || [], { today: data.today }).fundraisers;
     const count = Math.max(events.length, media.images.length, (events.length || media.images.length || media.description) ? 1 : 0);
     for (let index = 0; index < count; index += 1) {
       const event = events[index] || null;
@@ -787,11 +809,12 @@ export function renderEventCard(event, cards = []) {
 
 /** Upcoming, not-cancelled Calendar events for one event-cards block. */
 export function selectEventCards(events = [], { category = 'all', limit = 3, today = '' } = {}) {
-  const day = today || new Date().toISOString().slice(0, 10);
+  const day = today || easternTodayIso();
   const n = Math.min(Math.max(Number(limit) || 3, 1), 12);
   return (Array.isArray(events) ? events : [])
-    .filter((e) => e && e.start_date && !e.cancelled_at && ((e.end_date || e.start_date) >= day))
+    .filter((e) => e && e.start_date && !e.cancelled_at && eventLastDay(e) >= day)
     .filter((e) => eventMatchesCategory(e, category))
+    .slice().sort(compareEventsByStart)
     .slice(0, n);
 }
 
@@ -826,7 +849,7 @@ export function fillLiveSlots(html, data = {}) {
   let next = String(html || '');
   if (!next.includes('data-home-slot')) return next;
   next = fillEventCardSlots(next, data);
-  const schedule = selectHomeSchedule(data.events || []);
+  const schedule = selectHomeSchedule(data.events || [], { today: data.today });
   const nf = schedule.nextFundraiser;
   const cards = data.fundraiserCards || [];
   const card = nf ? (cards.find((c) => c.source_event_id != null && String(c.source_event_id) === String(nf.id))

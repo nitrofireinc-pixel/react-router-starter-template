@@ -287,27 +287,21 @@ export function publicPageBlocksStatement(env, slug = 'fundraising') {
 export function mergePublicPageBlocks(blocks = [], cards = [], today = '') {
   const list = sanitizePageBlockList(blocks).filter((block) => !Number(block.hidden));
   const cardMap = new Map((Array.isArray(cards) ? cards : []).map((card) => [Number(card.id), card]));
-  const used = new Set();
+  // Hero blocks keep their saved slots; fundraiser cards always fill the card
+  // slots in event-date order (cards arrive sorted by start date, then time).
+  const blockFor = new Map();
+  list.forEach((block) => { if (block.kind !== 'hero' && cardMap.has(Number(block.ref_id))) blockFor.set(Number(block.ref_id), block); });
+  const queue = (Array.isArray(cards) ? cards : []).map((card) => ({
+    type: 'fundraiser',
+    block: blockFor.get(Number(card.id)) || { kind: 'fundraiser', ref_id: Number(card.id), hidden: 0 },
+    card,
+  }));
   const ordered = [];
   list.forEach((block) => {
-    if (block.kind === 'hero') {
-      ordered.push({ type: 'hero', block });
-      return;
-    }
-    const card = cardMap.get(Number(block.ref_id));
-    if (!card) return;
-    used.add(Number(card.id));
-    ordered.push({ type: 'fundraiser', block, card });
+    if (block.kind === 'hero') ordered.push({ type: 'hero', block });
+    else if (cardMap.has(Number(block.ref_id)) && queue.length) ordered.push(queue.shift());
   });
-  (Array.isArray(cards) ? cards : []).forEach((card) => {
-    if (used.has(Number(card.id))) return;
-    ordered.push({
-      type: 'fundraiser',
-      block: { kind: 'fundraiser', ref_id: Number(card.id), hidden: 0 },
-      card,
-    });
-  });
-  return ordered;
+  return ordered.concat(queue);
 }
 
 export function blocksFromFundraiserCards(cards = []) {

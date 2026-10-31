@@ -140,6 +140,7 @@ import {
 import {
   canEditFundraiserCards,
   canPublishFundraiserCards,
+  addDaysIso,
   createFundraiserCard,
   deleteFundraiserCard,
   fundraiserCardFieldDiff,
@@ -153,7 +154,6 @@ import {
   publicFundraiserCardsStatement,
   renderFundraiserCardsAdminHtml,
   renderFundraisingCardFromCms,
-  reorderFundraiserCards,
   runFundraiserCardCalendarSync,
   syncCalendarEventToFundraiserCard,
   setFundraiserAlertEmails,
@@ -612,13 +612,13 @@ const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-export const ASSET_VERSION = 'cms-p2-20261031y';
+export const ASSET_VERSION = 'cms-p2-20261031z';
 // Admin-only assets (Studio home). Bumping this never changes public page bytes.
 export const ADMIN_HOME_VERSION = `${ASSET_VERSION}-home5`;
 /** Admin-only cache key for the 14c sidebar + launcher (public pages keep ASSET_VERSION). */
 export const ADMIN_NAV_VERSION = adminNavAssetVersion(ASSET_VERSION);
 /* Pinned CMS photo “Home Game Performance (4)” (id 86, original 14925.jpg). Gallery matching must not replace it. */
-export const HOME_HERO_PHOTO = '/assets/efhs-home-hero.jpg?v=cms-p2-20261031y';
+export const HOME_HERO_PHOTO = '/assets/efhs-home-hero.jpg?v=cms-p2-20261031z';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
 const PUBLIC_BRAND_MARK = `${BLUE_REGIMENT_MARK_PATH}?v=${ASSET_VERSION}`;
 const MINUTES_LETTERHEAD_BANNER = `/assets/minutes-template/letterhead-banner.png?v=${ASSET_VERSION}`;
@@ -7427,6 +7427,24 @@ async function caldevAfterSave(env, ctx, user, rows = []) {
   }
 }
 
+/** Calendar events a card can link to: not cancelled, from 30 days ago on, plus any already linked. */
+export async function listFundraiserCardEventChoices(env, cards = []) {
+  const since = addDaysIso(easternTodayIso(), -30);
+  const linked = [...new Set(cards.map((c) => Number(c.source_event_id)).filter((id) => id > 0))];
+  try {
+    const result = await env.DB.prepare(`
+      SELECT id, title, start_date, end_date, start_time, track FROM caldev_events
+      WHERE cancelled_at IS NULL AND start_date != ''
+        AND (start_date >= ? OR (end_date != '' AND end_date >= ?) OR id IN (SELECT value FROM json_each(?)))
+      ORDER BY start_date ASC, start_time ASC, id ASC LIMIT 400
+    `).bind(since, since, JSON.stringify(linked)).all();
+    return (result?.results || []).map((e) => ({
+      id: Number(e.id), title: String(e.title || ''), start_date: String(e.start_date || ''),
+      end_date: String(e.end_date || ''), start_time: String(e.start_time || ''), track: String(e.track || ''),
+    }));
+  } catch { return []; }
+}
+
 async function syncFundraiserCardsFromCalendar(env, request, options = {}) {
   return runFundraiserCardCalendarSync(env, {
     sendEmail: (payload) => sendFundraiserAlert(env, payload),
@@ -9717,6 +9735,7 @@ async function routeFundraiserCardsApi(request, env, url, ctx = null) {
     const cards = await listFundraiserCards(env);
     return jsonResponse({
       cards,
+      calendar_events: await listFundraiserCardEventChoices(env, cards),
       can_publish: canPublish,
       alert_emails: await getFundraiserAlertEmails(env),
     });
@@ -9739,15 +9758,8 @@ async function routeFundraiserCardsApi(request, env, url, ctx = null) {
       return jsonResponse({ detail: error.message }, error.status || 400);
     }
   }
-  if (reorderMatch && request.method === 'POST') {
-    const payload = await request.json().catch(() => ({}));
-    const cards = await reorderFundraiserCards(env, payload.ids || payload, { user: auth.user });
-    await logFundraiserCardAudit(env, ctx, request, {
-      user: auth.user,
-      action: 'fundraiser.card.reorder',
-      extra: { ids: payload.ids || payload },
-    });
-    return jsonResponse({ cards });
+  if (reorderMatch) {
+    return jsonResponse({ detail: 'Fundraiser cards sort by event date; manual order was removed.' }, 410);
   }
   if (syncMatch && request.method === 'POST') {
     if (!canPublish) return jsonResponse({ detail: 'Permission required to check the calendar' }, 403);
@@ -12170,11 +12182,12 @@ async function routeApi(request, env, url, ctx = null) {
       decorateLive: async (html, slug) => {
         if (html && html.includes('data-cms-form-v2=')) html = await fillFormBlocks(env, html, { assetVersion: ASSET_VERSION }).catch(() => html);
         if (!/data-home-slot|data-photo-gallery|data-site-field|#instagram/.test(html)) return html;
-        const today = new Date().toISOString().slice(0, 10);
+        const today = easternTodayIso();
         const reads = await loadPublicCmsReads(env, { path: '/', today, isHome: true, needsEvents: true, needsBoosters: true, needsPhotos: true });
         const homeSources = reads.homeSources || {};
         const instagramHref = normalizeSocialLinks(reads.site.social_links).find((link) => link.platform === 'instagram')?.href || '';
         let out = fillLiveSlots(html, {
+          today,
           events: reads.homeEvents,
           members: reads.boosterMembers,
           fundraisingHtml: homeSources.fundraising?.body_html || '',
@@ -15696,6 +15709,7 @@ async function serveStaticOrCms(request, env, url, ctx) {
       const deadlineBanners = buildDeadlineBannerItems(reads.deadlineEvents, today);
       const sponsors = pageIsLive && page.slug === 'sponsors' ? allSponsors.filter(sponsorShowsOnPage) : [];
       const home = isHome || usesLiveSlots ? {
+        today,
         events: reads.homeEvents,
         members: boosterMembers,
         fundraisingHtml: homeSources.fundraising?.body_html || '',

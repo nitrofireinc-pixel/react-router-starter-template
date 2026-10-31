@@ -153,7 +153,8 @@ export function canPublishFundraiserCards(user, deps = {}) {
 
 export function isPublicFundraiserCard(card = {}, today = '') {
   if (String(card.status || '') !== 'approved') return false;
-  if (!Number(card.auto_hide_after_date)) return true;
+  // Every card drops off after its last day (America/New_York); the saved
+  // auto_hide_after_date flag is ignored.
   const start = String(card.event_date || '').trim();
   const spanEnd = String(card.span_end || '').trim();
   const date = spanEnd && (!start || spanEnd > start) ? spanEnd : start;
@@ -184,7 +185,9 @@ export function publicFundraiserCardsStatement(env) {
     FROM fundraiser_cards c
     LEFT JOIN caldev_events e ON e.id = c.source_event_id
     WHERE c.status = 'approved'
-    ORDER BY c.sort_order ASC, c.event_date ASC, c.id ASC
+    ORDER BY (CASE WHEN e.id IS NOT NULL AND e.cancelled_at IS NULL AND e.start_date != '' THEN e.start_date ELSE c.event_date END) ASC,
+             (CASE WHEN e.id IS NOT NULL AND e.cancelled_at IS NULL AND e.start_date != '' THEN COALESCE(e.start_time, '') ELSE c.start_time END) ASC,
+             c.id ASC
   `);
 }
 
@@ -646,11 +649,11 @@ export async function listFundraiserCards(env) {
            status, source_event_id, calendar_changed, sort_order,
            created_by, created_at, updated_by, updated_at, approved_by, approved_at
     FROM fundraiser_cards
-    ORDER BY CASE status WHEN 'rejected' THEN 1 ELSE 0 END, sort_order ASC, event_date ASC, id ASC
+    ORDER BY CASE status WHEN 'rejected' THEN 1 ELSE 0 END, event_date ASC, start_time ASC, id ASC
   `).all();
   const cards = (result?.results || []).map(mapFundraiserCardRow);
   await applyFundraiserSpanEnds(env, cards);
-  return cards;
+  return sortFundraiserCardsByDate(cards);
 }
 
 export async function getFundraiserCard(env, id) {
@@ -669,10 +672,8 @@ export async function getFundraiserCard(env, id) {
 }
 
 async function nextSortOrder(env) {
-  const row = await env.DB.prepare(
-    "SELECT COALESCE(MAX(sort_order), -1) + 1 AS n FROM fundraiser_cards WHERE status != 'rejected'",
-  ).first();
-  return Number(row?.n) || 0;
+  // sort_order is no longer used for display (cards sort by event date); kept for the column.
+  return 0;
 }
 
 const INSERT_SQL = `
@@ -716,11 +717,51 @@ function bindCardRow(card, { createdBy = null, updatedBy = null, approvedBy = nu
   ];
 }
 
+/** Start date then start time (empty time first), then id. Rejected cards go last. */
+export function compareFundraiserCardsByDate(a = {}, b = {}) {
+  const ra = a.status === 'rejected' ? 1 : 0;
+  const rb = b.status === 'rejected' ? 1 : 0;
+  if (ra !== rb) return ra - rb;
+  const da = String(a.live_event_date || a.event_date || '');
+  const db = String(b.live_event_date || b.event_date || '');
+  if (da !== db) return da < db ? -1 : 1;
+  const ta = String((a.live_event_date ? a.live_start_time : a.start_time) || '');
+  const tb = String((b.live_event_date ? b.live_start_time : b.start_time) || '');
+  if (ta !== tb) return ta < tb ? -1 : 1;
+  return (Number(a.id) || 0) - (Number(b.id) || 0);
+}
+
+export function sortFundraiserCardsByDate(cards = []) {
+  return (Array.isArray(cards) ? cards.slice() : []).sort(compareFundraiserCardsByDate);
+}
+
+/** New and edited cards must link a live (not cancelled) calendar event; returns that event. */
+export async function requireLinkedCalendarEvent(env, sourceEventId) {
+  const id = Number(sourceEventId);
+  const fail = (msg) => { const error = new Error(msg); error.status = 422; throw error; };
+  if (!Number.isFinite(id) || id <= 0) fail('Pick the calendar event this card is for.');
+  const event = await env.DB.prepare(
+    'SELECT id, title, start_date, end_date, start_time, end_time, location, cancelled_at FROM caldev_events WHERE id = ?',
+  ).bind(id).first();
+  if (!event || event.cancelled_at || !event.start_date) fail('That calendar event was not found or is cancelled.');
+  return event;
+}
+
+function copyEventFields(card, event) {
+  card.source_event_id = Number(event.id);
+  card.event_date = String(event.start_date || card.event_date || '');
+  card.start_time = normalizeClock(event.start_time || '');
+  card.end_time = normalizeClock(event.end_time || '');
+  if (event.location) card.location = plainText(event.location).slice(0, 200);
+}
+
 export async function createFundraiserCard(env, payload, { user = null, now = '' } = {}) {
   const card = normalizeFundraiserCardPayload(payload);
   card.status = 'draft';
   card.calendar_changed = 0;
-  if (!card.sort_order) card.sort_order = await nextSortOrder(env);
+  card.auto_hide_after_date = 1;
+  card.sort_order = 0;
+  copyEventFields(card, await requireLinkedCalendarEvent(env, payload.source_event_id));
   const result = await env.DB.prepare(INSERT_SQL).bind(...bindCardRow(card, {
     createdBy: user?.id ?? null,
     updatedBy: user?.id ?? null,
@@ -740,39 +781,23 @@ export async function updateFundraiserCard(env, id, payload, { user = null } = {
   const card = normalizeFundraiserCardPayload(payload, existing);
   card.status = existing.status;
   card.calendar_changed = existing.calendar_changed;
-  card.source_event_id = existing.source_event_id;
+  const wanted = payload.source_event_id === undefined ? existing.source_event_id : payload.source_event_id;
+  copyEventFields(card, await requireLinkedCalendarEvent(env, wanted));
+  card.auto_hide_after_date = existing.auto_hide_after_date;
   await env.DB.prepare(`
     UPDATE fundraiser_cards SET
       title=?, description=?, event_date=?, start_time=?, end_time=?, location=?,
       picture_mode=?, image_url=?, must_attend=?, volunteers_needed=?, custom_label=?,
       primary_button=?, primary_url=?, show_add_to_calendar=?, auto_hide_after_date=?,
-      updated_by=?, updated_at=?
+      source_event_id=?, updated_by=?, updated_at=?
     WHERE id=?
   `).bind(
     card.title, card.description, card.event_date, card.start_time, card.end_time, card.location,
     card.picture_mode, card.image_url, card.must_attend, card.volunteers_needed, card.custom_label,
     card.primary_button, card.primary_url, card.show_add_to_calendar, card.auto_hide_after_date,
-    user?.id ?? null, new Date().toISOString(), Number(id),
+    card.source_event_id, user?.id ?? null, new Date().toISOString(), Number(id),
   ).run();
   return getFundraiserCard(env, id);
-}
-
-export async function reorderFundraiserCards(env, ids = [], { user = null } = {}) {
-  const list = (Array.isArray(ids) ? ids : []).map((id) => Number(id)).filter((id) => Number.isFinite(id) && id > 0);
-  const existing = await listFundraiserCards(env);
-  const active = existing.filter((card) => card.status !== 'rejected');
-  if (!list.length || list.length !== active.length || list.some((id) => !active.some((card) => card.id === id))) {
-    const error = new Error('Order must include every non-rejected card exactly once');
-    error.status = 422;
-    throw error;
-  }
-  const now = new Date().toISOString();
-  for (const [index, id] of list.entries()) {
-    await env.DB.prepare('UPDATE fundraiser_cards SET sort_order=?, updated_by=?, updated_at=? WHERE id=?')
-      .bind(index, user?.id ?? null, now, id)
-      .run();
-  }
-  return listFundraiserCards(env);
 }
 
 export async function setFundraiserCardStatus(env, id, status, { user = null } = {}) {
@@ -1196,6 +1221,9 @@ export function renderFundraiserCardsAdminHtml(assetVersion = 'dev', options = {
             <h2 data-fc-editor-title>Edit fundraiser</h2>
             <p class="fc-status-line" data-fc-status-line></p>
           </div>
+          <label>Calendar event <small>required — the card uses this event's dates</small>
+            <select name="source_event_id" required data-fc-event-select><option value="">Choose a calendar event…</option></select>
+          </label>
           <label>Title <input name="title" required maxlength="160"></label>
           <label>Short description <textarea name="description" rows="3" maxlength="800"></textarea></label>
           <div class="fc-grid-2">
@@ -1236,7 +1264,6 @@ export function renderFundraiserCardsAdminHtml(assetVersion = 'dev', options = {
             <label>Button URL <input name="primary_url" placeholder="https:// or /page.html"></label>
           </div>
           <label class="fc-check"><input type="checkbox" name="show_add_to_calendar" checked> Add to calendar</label>
-          <label class="fc-check"><input type="checkbox" name="auto_hide_after_date" checked> Auto-hide after the date</label>
           <div class="fc-editor-actions">
             <button type="submit" class="btn primary">Save</button>
             <button type="button" class="btn outline" data-fc-approve hidden>Approve</button>

@@ -2392,17 +2392,17 @@ test('public visual theme is CSS-only and uses CMS photograph URLs', () => {
   assert.match(workerSrc, /pageByPathStatement\(env, path\)/);
   assert.match(workerSrc, /FROM cms_pages WHERE path = \?`/);
   assert.match(workerSrc, /pageSlug === 'ensembles'/);
-  assert.match(workerSrc, /HOME_HERO_PHOTO = '\/assets\/efhs-home-hero\.jpg\?v=cms-p2-20261031y'/);
+  assert.match(workerSrc, /HOME_HERO_PHOTO = '\/assets\/efhs-home-hero\.jpg\?v=cms-p2-20261031z'/);
   assert.match(syncSrc, /'public-theme\.css'/);
   assert.match(syncSrc, /'error-page\.css'/);
   assert.match(syncSrc, /cpSync\(join\(ROOT, 'assets'\), assetsDest/);
   assert.match(siteContent, /function applyPublicThemePhotos/);
-  assert.match(siteContent, /\/assets\/efhs-home-hero\.jpg\?v=cms-p2-20261031y/);
+  assert.match(siteContent, /\/assets\/efhs-home-hero\.jpg\?v=cms-p2-20261031z/);
   assert.match(themeCss, /body\.efhs-theme/);
   assert.match(themeCss, /#page-preview \.hero/);
-  assert.match(themeCss, /--efhs-hero-photo:url\("\/assets\/efhs-home-hero\.jpg\?v=cms-p2-20261031y"\)/);
+  assert.match(themeCss, /--efhs-hero-photo:url\("\/assets\/efhs-home-hero\.jpg\?v=cms-p2-20261031z"\)/);
   assert.match(themeCss, /--efhs-header-banner:url\("\/assets\/header-banner-gen\.jpg\?v=home-redesign-20261002"\)/);
-  assert.match(workerSrc, /ASSET_VERSION = 'cms-p2-20261031y'/);
+  assert.match(workerSrc, /ASSET_VERSION = 'cms-p2-20261031z'/);
   assert.match(themeCss, /background-size:100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,125% auto/);
   assert.match(themeCss, /background-size:100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,cover/);
   assert.match(themeCss, /background-position:center,center,center,center,center,center,46% 44%/);
@@ -2440,7 +2440,7 @@ test('public visual theme is CSS-only and uses CMS photograph URLs', () => {
   const close = (themeCss.match(/\}/g) || []).length;
   assert.equal(open - close, 0, `public-theme.css brace delta should be 0, got ${open - close}`);
   assert.equal(safePublicThemePhotoUrl('/uploads/march.jpg'), '/uploads/march.jpg');
-  assert.equal(safePublicThemePhotoUrl('/assets/efhs-home-hero.jpg?v=cms-p2-20261031y'), '/assets/efhs-home-hero.jpg?v=cms-p2-20261031y');
+  assert.equal(safePublicThemePhotoUrl('/assets/efhs-home-hero.jpg?v=cms-p2-20261031z'), '/assets/efhs-home-hero.jpg?v=cms-p2-20261031z');
   assert.equal(safePublicThemePhotoUrl('https://evil.example/x.jpg'), '');
   assert.equal(safePublicThemePhotoUrl('javascript:alert(1)'), '');
   const vars = pickPublicThemePhotoVars([
@@ -2448,11 +2448,11 @@ test('public visual theme is CSS-only and uses CMS photograph URLs', () => {
     { url: 'https://evil.example/x.jpg', caption: 'Away game' },
     { url: '/uploads/game.jpg', alt_text: 'Away game at Glenn' },
   ], { slug: 'home' });
-  assert.equal(HOME_HERO_PHOTO, '/assets/efhs-home-hero.jpg?v=cms-p2-20261031y');
+  assert.equal(HOME_HERO_PHOTO, '/assets/efhs-home-hero.jpg?v=cms-p2-20261031z');
   assert.equal(vars.hero, HOME_HERO_PHOTO);
   assert.notEqual(vars.hero, '/uploads/march.jpg');
   const css = renderPublicThemePhotoStyle(vars);
-  assert.match(css, /url\("\/assets\/efhs-home-hero\.jpg\?v=cms-p2-20261031y"\)/);
+  assert.match(css, /url\("\/assets\/efhs-home-hero\.jpg\?v=cms-p2-20261031z"\)/);
   assert.match(css, /url\("\/uploads\/march\.jpg"\)/);
   assert.doesNotMatch(css, /evil\.example/);
   const calendarVars = pickPublicThemePhotoVars([
@@ -2855,6 +2855,7 @@ test('home redesign upgrades old CMS HTML and binds fundraisers without inventin
   assert.equal(APPROVED_HERO_SUBTITLE.includes('Blue Regiment'), true);
 
   const decorated = decorateHomeRedesign(buildHomeRedesignDocument(), {
+    today: '2026-10-01',
     events: [{
       title: 'Fundraiser/Mattress Sale',
       description: 'Fundraiser at Mattress Warehouse. Students must attend.',
@@ -2884,6 +2885,7 @@ test('home redesign upgrades old CMS HTML and binds fundraisers without inventin
     '<p class="nf-deal" data-home-deal>Save <b>30%–70%</b> off retail pricing</p><a class="btn btn-blue btn-block" href="/fundraising.html">Fundraiser details</a>',
   );
   const silentAuction = decorateHomeRedesign(storedDeal, {
+    today: '2026-10-01',
     events: [{
       title: 'Fundraiser/Silent Auction',
       description: 'Silent Auction Students and Parents Help Needed Location TBD',
@@ -2896,10 +2898,12 @@ test('home redesign upgrades old CMS HTML and binds fundraisers without inventin
   assert.doesNotMatch(silentAuction, /class="nf-deal"/);
   // Deal text now comes from the calendar event; the old hardcoded sentence is still dropped.
   const customDeal = decorateHomeRedesign(storedDeal, {
+    today: '2026-10-01',
     events: [{ title: 'Fundraiser/Silent Auction', start_date: '2026-11-14', all_day: 1, deal_text: 'Bring a neighbor' }],
   });
   assert.match(customDeal, /Bring a neighbor/);
   const legacyDeal = decorateHomeRedesign(storedDeal, {
+    today: '2026-10-01',
     events: [{ title: 'Fundraiser/Silent Auction', start_date: '2026-11-14', all_day: 1, deal_text: 'Save 30%–70% off retail pricing' }],
   });
   assert.doesNotMatch(legacyDeal, /off retail pricing/);
@@ -2908,6 +2912,7 @@ test('home redesign upgrades old CMS HTML and binds fundraisers without inventin
   assert.match(decorated, /data-home-slot="events"/);
   assert.match(decorated, /class="final"/);
   const withTiers = decorateHomeRedesign(buildHomeRedesignDocument(), {
+    today: '2026-10-01',
     tiers: {
       bronze_label: 'Bronze',
       bronze_amount: '$250',
@@ -2960,6 +2965,7 @@ test('fundraising page cards use CMS flyer and event data without inventing a ti
   assert.equal(media.description, '');
 
   const html = decorateFundraisingPage(liveStyle, {
+    today: '2026-10-01',
     events: [{
       id: 51,
       title: 'Fundraiser/Mattress Sale',
@@ -3019,6 +3025,7 @@ test('fundraising page cards use CMS flyer and event data without inventing a ti
   assert.match(html, /data-email-list-open/);
   assert.doesNotMatch(html, /class="content email-list-signup"/);
   const timed = decorateFundraisingPage(liveStyle, {
+    today: '2026-10-01',
     events: [{
       title: 'Fundraiser/Mattress Sale',
       description: 'Fundraiser at Mattress Warehouse',

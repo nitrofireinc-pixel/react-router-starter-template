@@ -23,6 +23,7 @@ import {
   runFundraiserCardCalendarSync,
   setFundraiserCardStatus,
   syncCalendarEventToFundraiserCard,
+  updateFundraiserCard,
 } from '../worker/src/fundraiser-cards.mjs';
 import { decorateFundraisingPage } from '../worker/src/home-redesign.mjs';
 import {
@@ -83,6 +84,9 @@ function createCardStore(seed = {}) {
             if (q.includes('MAX(sort_order)')) {
               const active = cards.filter((card) => card.status !== 'rejected');
               return { n: (active.reduce((max, card) => Math.max(max, Number(card.sort_order) || 0), -1) + 1) };
+            }
+            if (q.includes('FROM caldev_events WHERE id = ?')) {
+              return events.find((event) => Number(event.id) === Number(this.binds[0])) || null;
             }
             if (q.includes('FROM fundraiser_cards WHERE id')) {
               return cards.find((card) => Number(card.id) === Number(this.binds[0])) || null;
@@ -229,7 +233,7 @@ function createCardStore(seed = {}) {
 
 test('schema, audit actions, DEV cron, and CMS shortcut are wired', () => {
   assert.equal(DB_SCHEMA_VERSION, '2026-10-04.8');
-  assert.match(workerSrc, /ASSET_VERSION = 'cms-p2-20261031y'/);
+  assert.match(workerSrc, /ASSET_VERSION = 'cms-p2-20261031z'/);
   const cardsAdmin = renderFundraiserCardsAdminHtml('test');
   assert.match(cardsAdmin, /class="admin-shell cms-shell image-admin-shell"/);
   assert.match(cardsAdmin, /class="admin-workspace"/);
@@ -326,9 +330,9 @@ test('first migrate imports Mattress Sale and Silent Auction as approved', async
   assert.equal(store.cards[1].picture_mode, 'date_tile');
 });
 
-test('approved past cards hide unless auto_hide_after_date is off', () => {
+test('approved past cards always hide, ignoring a saved auto_hide_after_date = 0', () => {
   assert.equal(isPublicFundraiserCard({ status: 'approved', event_date: '2026-10-01', auto_hide_after_date: 1 }, '2026-10-10'), false);
-  assert.equal(isPublicFundraiserCard({ status: 'approved', event_date: '2026-10-01', auto_hide_after_date: 0 }, '2026-10-10'), true);
+  assert.equal(isPublicFundraiserCard({ status: 'approved', event_date: '2026-10-01', auto_hide_after_date: 0 }, '2026-10-10'), false);
   assert.equal(isPublicFundraiserCard({ status: 'draft', event_date: '2026-10-24', auto_hide_after_date: 1 }, '2026-10-10'), false);
   assert.equal(isPublicFundraiserCard({ status: 'rejected', event_date: '2026-10-24', auto_hide_after_date: 1 }, '2026-10-10'), false);
   assert.equal(isPublicFundraiserCard({ status: 'approved', event_date: '2026-10-24', auto_hide_after_date: 1 }, '2026-10-10'), true);
@@ -781,4 +785,23 @@ test('linked cards lock date/time inputs to the calendar event', () => {
   assert.match(js, /Set by the calendar event/);
   assert.match(js, /input\.readOnly = linked;/);
   assert.match(js, /event_date: live \? \(current\.event_date/);
+});
+
+test('new and edited cards must link a live calendar event and take its dates', async () => {
+  const store = createCardStore({
+    events: [
+      { id: 7, title: 'Fundraiser/Car Wash', start_date: '2026-11-21', start_time: '09:00', end_time: '12:00', location: 'School lot', track: 'fundraiser' },
+      { id: 8, title: 'Gone', start_date: '2026-11-22', cancelled_at: '2026-10-01', track: 'fundraiser' },
+    ],
+  });
+  await assert.rejects(createFundraiserCard(store.env, { title: 'No link', event_date: '2026-11-21' }), (e) => e.status === 422);
+  await assert.rejects(createFundraiserCard(store.env, { title: 'Cancelled', source_event_id: 8 }), (e) => e.status === 422);
+  const card = await createFundraiserCard(store.env, { title: 'Car Wash', event_date: '2026-01-01', source_event_id: 7, auto_hide_after_date: 0 });
+  assert.equal(card.source_event_id, 7);
+  assert.equal(card.event_date, '2026-11-21');
+  assert.equal(card.start_time, '09:00');
+  assert.equal(card.auto_hide_after_date, 1);
+  // An unlinked existing card cannot be saved until it is linked.
+  store.cards.push({ ...store.cards[0], id: 99, source_event_id: null, title: 'Old unlinked' });
+  await assert.rejects(updateFundraiserCard(store.env, 99, { title: 'Edit' }), (e) => e.status === 422);
 });

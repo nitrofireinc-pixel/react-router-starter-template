@@ -20,6 +20,7 @@
   const galleryGrid = document.querySelector('[data-fc-gallery-grid]');
   const fileInput = document.querySelector('[data-fc-file]');
   let cards = [];
+  let calendarEvents = [];
   let selectedId = Number(new URLSearchParams(location.search).get('id') || 0) || null;
   let previewTimer = 0;
 
@@ -74,8 +75,7 @@
   }
 
   function rowHtml(card, { reject = false } = {}) {
-    return `<article class="fc-card-row${Number(card.id) === Number(selectedId) ? ' is-active' : ''}" data-id="${card.id}" ${reject ? '' : 'draggable="true"'}>
-      <span class="fc-drag" aria-hidden="true">${reject ? '' : '⋮⋮'}</span>
+    return `<article class="fc-card-row${Number(card.id) === Number(selectedId) ? ' is-active' : ''}" data-id="${card.id}">
       ${thumb(card)}
       <div class="fc-card-copy">
         <strong><button type="button" class="fc-title-link" data-fc-open="${card.id}">${escapeHtml(card.title)}</button></strong>
@@ -115,29 +115,6 @@
     document.querySelectorAll('[data-fc-delete-row]').forEach((button) => {
       button.onclick = () => deleteCard(Number(button.dataset.fcDeleteRow));
     });
-    if (!listEl) return;
-    listEl.querySelectorAll('.fc-card-row').forEach((row) => {
-      row.addEventListener('dragstart', (event) => {
-        event.dataTransfer.setData('text/plain', row.dataset.id);
-        row.classList.add('is-dragging');
-      });
-      row.addEventListener('dragend', () => row.classList.remove('is-dragging'));
-      row.addEventListener('dragover', (event) => event.preventDefault());
-      row.addEventListener('drop', async (event) => {
-        event.preventDefault();
-        const from = Number(event.dataTransfer.getData('text/plain'));
-        const to = Number(row.dataset.id);
-        if (!from || from === to) return;
-        const active = cards.filter((card) => card.status !== 'rejected');
-        const ids = active.map((card) => card.id);
-        const fromAt = ids.indexOf(from);
-        const toAt = ids.indexOf(to);
-        if (fromAt < 0 || toAt < 0) return;
-        ids.splice(toAt, 0, ids.splice(fromAt, 1)[0]);
-        await api('/api/admin/fundraiser-cards/reorder', { method: 'POST', body: { ids } });
-        await load();
-      });
-    });
   }
 
   async function api(path, { method = 'GET', body } = {}) {
@@ -155,6 +132,7 @@
   async function load() {
     const data = await api('/api/admin/fundraiser-cards');
     cards = data.cards || [];
+    calendarEvents = data.calendar_events || [];
     if (!selectedId && cards.length) selectedId = cards[0].id;
     renderList();
     if (selectedId) selectCard(selectedId, { silent: true });
@@ -192,7 +170,7 @@
     field('primary_button').value = card.primary_button || 'details';
     field('primary_url').value = card.primary_url || '';
     field('show_add_to_calendar').checked = card.show_add_to_calendar == null ? true : Boolean(Number(card.show_add_to_calendar));
-    field('auto_hide_after_date').checked = card.auto_hide_after_date == null ? true : Boolean(Number(card.auto_hide_after_date));
+    fillEventSelect(card);
     toggleImageActions();
     const title = document.querySelector('[data-fc-editor-title]');
     if (title) title.textContent = card.id ? 'Edit fundraiser' : 'Add fundraiser';
@@ -234,6 +212,27 @@
     lockNote.hidden = !linked;
   }
 
+  /** Every card links one calendar event; the public card uses its dates. */
+  function fillEventSelect(card) {
+    const select = field('source_event_id');
+    if (!select) return;
+    const current = card?.source_event_id == null ? '' : String(card.source_event_id);
+    const label = (e) => `${e.start_date}${e.end_date && e.end_date > e.start_date ? ` – ${e.end_date}` : ''}${e.start_time ? ` ${e.start_time}` : ''} · ${e.title}`;
+    select.innerHTML = '<option value="">Choose a calendar event…</option>' + calendarEvents
+      .map((e) => `<option value="${e.id}">${escapeHtml(label(e))}</option>`).join('');
+    select.value = current;
+    if (current && select.value !== current) select.value = '';
+    let warn = editor.querySelector('[data-fc-unlinked]');
+    if (!warn) {
+      warn = document.createElement('p');
+      warn.setAttribute('data-fc-unlinked', '');
+      warn.className = 'fc-editor-note';
+      warn.textContent = 'Not linked to a calendar event yet. Pick one to save changes.';
+      select.closest('label')?.after(warn);
+    }
+    warn.hidden = !(card?.id && !current);
+  }
+
   function selectCard(id, { silent = false } = {}) {
     const card = cards.find((item) => Number(item.id) === Number(id));
     if (!card) return;
@@ -264,7 +263,7 @@
       primary_button: field('primary_button').value,
       primary_url: field('primary_url').value,
       show_add_to_calendar: field('show_add_to_calendar').checked,
-      auto_hide_after_date: field('auto_hide_after_date').checked,
+      source_event_id: field('source_event_id')?.value || '',
     };
   }
 
@@ -361,7 +360,6 @@
       status: 'draft',
       picture_mode: 'date_tile',
       show_add_to_calendar: 1,
-      auto_hide_after_date: 1,
       primary_button: 'details',
     });
     renderList();

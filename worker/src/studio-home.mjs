@@ -23,7 +23,7 @@ const BADGE_SQL = {
   pages: 'SELECT COUNT(*) FROM cms_pages WHERE active = 1',
   calendar: "SELECT COUNT(*) FROM caldev_events WHERE start_date >= ?1 AND start_date <= ?2 AND cancelled_at IS NULL",
   sponsors: 'SELECT COUNT(*) FROM sponsors WHERE active = 1',
-  fundraisers: "SELECT COUNT(*) FROM fundraiser_cards WHERE status = 'approved' AND (auto_hide_after_date = 0 OR event_date = '' OR event_date >= ?1)",
+  fundraisers: "SELECT COUNT(*) FROM fundraiser_cards WHERE status = 'approved' AND (event_date = '' OR event_date >= ?1)",
   minutes: 'SELECT COUNT(*) FROM booster_meeting_minutes WHERE created_at >= ?3',
   forms: "SELECT COUNT(*) FROM form_submissions WHERE status = 'new'",
   themes: "SELECT value FROM site_content WHERE key = 'studio_theme'",
