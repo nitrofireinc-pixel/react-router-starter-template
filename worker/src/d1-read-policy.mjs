@@ -99,8 +99,11 @@ export function attachD1Bookmark(response, session) {
   });
 }
 
+// Bump when a cached read's shape or order changes so old edge entries are skipped.
+export const EDGE_CACHE_SCHEMA = 'r2';
+
 function cacheRequestFor(key) {
-  return new Request(`https://efhsband.internal/d1-public/${encodeURIComponent(key)}`);
+  return new Request(`https://efhsband.internal/d1-public/${EDGE_CACHE_SCHEMA}/${encodeURIComponent(key)}`);
 }
 
 async function readEdgeCache(key) {
@@ -196,7 +199,10 @@ export async function readCachedPublicValue(key, { timeoutMs = PUBLIC_READ_PENDI
   if (publicReadGeneration !== (existing?.generation ?? publicReadGeneration)) {
     return { hit: false };
   }
-  await rememberPublicRead(key, edge, ctx);
+  // Edge hit: keep it in isolate memory only. Re-putting it would restart the
+  // edge TTL on every isolate miss, so a stale value could outlive deploys.
+  publicReadMemory.set(key, { value: edge, expires: Date.now() + PUBLIC_READ_CACHE_TTL_MS, generation: publicReadGeneration });
+  publicReadKeys.add(key);
   return { hit: true, value: edge };
 }
 
