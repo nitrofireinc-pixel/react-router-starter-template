@@ -163,12 +163,18 @@ export function isPublicFundraiserCard(card = {}, today = '') {
 
 export function publicFundraiserCardsStatement(env) {
   return env.DB.prepare(`
-    SELECT c.id, c.title, c.description, c.event_date, c.start_time, c.end_time, c.location,
+    -- Linked cards take their date/time/place live from the calendar event
+    -- (the card's own copies are only a fallback), so calendar edits show at once.
+    SELECT c.id, c.title, c.description,
+           CASE WHEN e.id IS NOT NULL AND e.cancelled_at IS NULL AND e.start_date != '' THEN e.start_date ELSE c.event_date END AS event_date,
+           CASE WHEN e.id IS NOT NULL AND e.cancelled_at IS NULL AND e.start_date != '' THEN COALESCE(e.start_time, '') ELSE c.start_time END AS start_time,
+           CASE WHEN e.id IS NOT NULL AND e.cancelled_at IS NULL AND e.start_date != '' THEN COALESCE(e.end_time, '') ELSE c.end_time END AS end_time,
+           COALESCE(NULLIF(e.location, ''), c.location) AS location,
            c.picture_mode, c.image_url, c.must_attend, c.volunteers_needed, c.custom_label,
            c.primary_button, c.primary_url, c.show_add_to_calendar, c.auto_hide_after_date,
            c.status, c.source_event_id, c.calendar_changed, c.sort_order,
            CASE
-             WHEN e.end_date != '' AND e.end_date > c.event_date THEN e.end_date
+             WHEN e.end_date != '' AND e.end_date > COALESCE(NULLIF(e.start_date, ''), c.event_date) THEN e.end_date
              WHEN e.series_id IS NOT NULL THEN (
                SELECT MAX(s.start_date) FROM caldev_events s
                WHERE s.series_id = e.series_id AND s.cancelled_at IS NULL

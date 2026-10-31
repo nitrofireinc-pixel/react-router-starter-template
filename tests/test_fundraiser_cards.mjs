@@ -229,7 +229,7 @@ function createCardStore(seed = {}) {
 
 test('schema, audit actions, DEV cron, and CMS shortcut are wired', () => {
   assert.equal(DB_SCHEMA_VERSION, '2026-10-04.8');
-  assert.match(workerSrc, /ASSET_VERSION = 'cms-p2-20261031t'/);
+  assert.match(workerSrc, /ASSET_VERSION = 'cms-p2-20261031u'/);
   const cardsAdmin = renderFundraiserCardsAdminHtml('test');
   assert.match(cardsAdmin, /class="admin-shell cms-shell image-admin-shell"/);
   assert.match(cardsAdmin, /class="admin-workspace"/);
@@ -753,4 +753,13 @@ test('fundraiser flyer uploads stay out of the public Gallery', () => {
   const worker = readFileSync(join(root, 'worker/src/worker.mjs'), 'utf8');
   assert.match(worker, /requestedSort < 0\) \{\s*resolvedSort = requestedSort;/);
   assert.match(worker, /FROM photos p LEFT JOIN[^"]*WHERE p\.sort_order >= 0/);
+});
+
+test('public fundraiser cards take date/time/place live from the linked calendar event', async () => {
+  const { publicFundraiserCardsStatement } = await import('../worker/src/fundraiser-cards.mjs');
+  let sql = '';
+  publicFundraiserCardsStatement({ DB: { prepare: (q) => { sql = q; return {}; } } });
+  assert.match(sql, /THEN e\.start_date ELSE c\.event_date END AS event_date/);
+  assert.match(sql, /COALESCE\(e\.start_time, ''\) ELSE c\.start_time END AS start_time/);
+  assert.match(sql, /COALESCE\(NULLIF\(e\.location, ''\), c\.location\) AS location/);
 });
