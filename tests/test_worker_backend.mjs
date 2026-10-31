@@ -2392,17 +2392,17 @@ test('public visual theme is CSS-only and uses CMS photograph URLs', () => {
   assert.match(workerSrc, /pageByPathStatement\(env, path\)/);
   assert.match(workerSrc, /FROM cms_pages WHERE path = \?`/);
   assert.match(workerSrc, /pageSlug === 'ensembles'/);
-  assert.match(workerSrc, /HOME_HERO_PHOTO = '\/assets\/efhs-home-hero\.jpg\?v=cms-p2-20261031zd'/);
+  assert.match(workerSrc, /HOME_HERO_PHOTO = '\/assets\/efhs-home-hero\.jpg\?v=cms-p2-20261031ze'/);
   assert.match(syncSrc, /'public-theme\.css'/);
   assert.match(syncSrc, /'error-page\.css'/);
   assert.match(syncSrc, /cpSync\(join\(ROOT, 'assets'\), assetsDest/);
   assert.match(siteContent, /function applyPublicThemePhotos/);
-  assert.match(siteContent, /\/assets\/efhs-home-hero\.jpg\?v=cms-p2-20261031zd/);
+  assert.match(siteContent, /\/assets\/efhs-home-hero\.jpg\?v=cms-p2-20261031ze/);
   assert.match(themeCss, /body\.efhs-theme/);
   assert.match(themeCss, /#page-preview \.hero/);
-  assert.match(themeCss, /--efhs-hero-photo:url\("\/assets\/efhs-home-hero\.jpg\?v=cms-p2-20261031zd"\)/);
+  assert.match(themeCss, /--efhs-hero-photo:url\("\/assets\/efhs-home-hero\.jpg\?v=cms-p2-20261031ze"\)/);
   assert.match(themeCss, /--efhs-header-banner:url\("\/assets\/header-banner-gen\.jpg\?v=home-redesign-20261002"\)/);
-  assert.match(workerSrc, /ASSET_VERSION = 'cms-p2-20261031zd'/);
+  assert.match(workerSrc, /ASSET_VERSION = 'cms-p2-20261031ze'/);
   assert.match(themeCss, /background-size:100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,125% auto/);
   assert.match(themeCss, /background-size:100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,100% 100%,cover/);
   assert.match(themeCss, /background-position:center,center,center,center,center,center,46% 44%/);
@@ -2440,7 +2440,7 @@ test('public visual theme is CSS-only and uses CMS photograph URLs', () => {
   const close = (themeCss.match(/\}/g) || []).length;
   assert.equal(open - close, 0, `public-theme.css brace delta should be 0, got ${open - close}`);
   assert.equal(safePublicThemePhotoUrl('/uploads/march.jpg'), '/uploads/march.jpg');
-  assert.equal(safePublicThemePhotoUrl('/assets/efhs-home-hero.jpg?v=cms-p2-20261031zd'), '/assets/efhs-home-hero.jpg?v=cms-p2-20261031zd');
+  assert.equal(safePublicThemePhotoUrl('/assets/efhs-home-hero.jpg?v=cms-p2-20261031ze'), '/assets/efhs-home-hero.jpg?v=cms-p2-20261031ze');
   assert.equal(safePublicThemePhotoUrl('https://evil.example/x.jpg'), '');
   assert.equal(safePublicThemePhotoUrl('javascript:alert(1)'), '');
   const vars = pickPublicThemePhotoVars([
@@ -2448,11 +2448,11 @@ test('public visual theme is CSS-only and uses CMS photograph URLs', () => {
     { url: 'https://evil.example/x.jpg', caption: 'Away game' },
     { url: '/uploads/game.jpg', alt_text: 'Away game at Glenn' },
   ], { slug: 'home' });
-  assert.equal(HOME_HERO_PHOTO, '/assets/efhs-home-hero.jpg?v=cms-p2-20261031zd');
+  assert.equal(HOME_HERO_PHOTO, '/assets/efhs-home-hero.jpg?v=cms-p2-20261031ze');
   assert.equal(vars.hero, HOME_HERO_PHOTO);
   assert.notEqual(vars.hero, '/uploads/march.jpg');
   const css = renderPublicThemePhotoStyle(vars);
-  assert.match(css, /url\("\/assets\/efhs-home-hero\.jpg\?v=cms-p2-20261031zd"\)/);
+  assert.match(css, /url\("\/assets\/efhs-home-hero\.jpg\?v=cms-p2-20261031ze"\)/);
   assert.match(css, /url\("\/uploads\/march\.jpg"\)/);
   assert.doesNotMatch(css, /evil\.example/);
   const calendarVars = pickPublicThemePhotoVars([
@@ -2641,7 +2641,7 @@ test('halloween bat sits beside the brand logo and adds no header padding', () =
   assert.doesNotMatch(style, /padding-top|min-height:120px/);
   assert.match(style, /left:var\(--hw-bat-left/);
   assert.match(halloweenBatLockScript(), /header\.appendChild\(wrap\)/);
-  assert.match(halloweenBatLockScript(), /brand-logo/);
+  assert.match(halloweenBatLockScript(), /\(h\.width-bw\)\/2/);
 });
 
 test('staff auth lives in the utility bar, not the main public nav', () => {

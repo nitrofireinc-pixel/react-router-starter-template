@@ -612,13 +612,13 @@ const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-export const ASSET_VERSION = 'cms-p2-20261031zd';
+export const ASSET_VERSION = 'cms-p2-20261031ze';
 // Admin-only assets (Studio home). Bumping this never changes public page bytes.
 export const ADMIN_HOME_VERSION = `${ASSET_VERSION}-home5`;
 /** Admin-only cache key for the 14c sidebar + launcher (public pages keep ASSET_VERSION). */
 export const ADMIN_NAV_VERSION = adminNavAssetVersion(ASSET_VERSION);
 /* Pinned CMS photo “Home Game Performance (4)” (id 86, original 14925.jpg). Gallery matching must not replace it. */
-export const HOME_HERO_PHOTO = '/assets/efhs-home-hero.jpg?v=cms-p2-20261031zd';
+export const HOME_HERO_PHOTO = '/assets/efhs-home-hero.jpg?v=cms-p2-20261031ze';
 const BLUE_REGIMENT_MARK_PATH = '/assets/efhs-blue-regiment-mark.png';
 const PUBLIC_BRAND_MARK = `${BLUE_REGIMENT_MARK_PATH}?v=${ASSET_VERSION}`;
 const MINUTES_LETTERHEAD_BANNER = `/assets/minutes-template/letterhead-banner.png?v=${ASSET_VERSION}`;
@@ -15502,11 +15502,11 @@ async function renderPublicNotFound(env, url, { loggedIn = false, ctx } = {}) {
 }
 
 export function halloweenBatHeaderStyle() {
-  return `<style id="halloween-bat-lock">#efhs-halloween{position:absolute!important;inset:0!important;height:auto!important;z-index:4;pointer-events:none;overflow:visible}#efhs-halloween .hw-bat{left:var(--hw-bat-left,-200px)!important;top:var(--hw-bat-top,4px)!important;margin-left:0!important;animation:none!important}</style>`;
+  return `<style id="halloween-bat-lock">#efhs-halloween{position:absolute!important;inset:0!important;height:auto!important;z-index:60!important;pointer-events:none!important;overflow:visible}#efhs-halloween *{pointer-events:none!important}#efhs-halloween .hw-bat{left:var(--hw-bat-left,-200px)!important;top:var(--hw-bat-top,4px)!important;margin-left:0!important;animation:none!important}</style>`;
 }
 
 export function halloweenBatLockScript() {
-  return '<script id="halloween-bat-lock">(function(){function lock(){var header=document.querySelector("header.site-header");var wrap=document.getElementById("efhs-halloween");if(!header||!wrap)return;if(wrap.parentElement!==header)header.appendChild(wrap);var logo=header.querySelector(".brand .brand-logo");var bat=wrap.querySelector(".hw-bat");if(!logo||!bat)return;var h=header.getBoundingClientRect(),l=logo.getBoundingClientRect(),bw=bat.offsetWidth||46,bh=bat.offsetHeight||24;wrap.style.setProperty("--hw-bat-left",Math.round(l.left-h.left-bw-6)+"px");wrap.style.setProperty("--hw-bat-top",Math.round(l.top-h.top+(l.height-bh)/2)+"px");}lock();window.setTimeout(lock,400);window.setTimeout(lock,1700);window.addEventListener("resize",lock);if(document.fonts&&document.fonts.ready)document.fonts.ready.then(lock);})();</script>';
+  return '<script id="halloween-bat-lock">(function(){function lock(){var header=document.querySelector("header.site-header");var wrap=document.getElementById("efhs-halloween");if(!header||!wrap)return;if(wrap.parentElement!==header)header.appendChild(wrap);var bat=wrap.querySelector(".hw-bat");if(!bat)return;var h=header.getBoundingClientRect(),bw=bat.getBoundingClientRect().width||46,bh=bat.getBoundingClientRect().height||24;wrap.style.setProperty("--hw-bat-left",Math.round((h.width-bw)/2)+"px");wrap.style.setProperty("--hw-bat-top",Math.max(0,Math.round((h.height-bh)/2))+"px");}lock();window.setTimeout(lock,400);window.setTimeout(lock,1700);window.addEventListener("resize",lock);if(document.fonts&&document.fonts.ready)document.fonts.ready.then(lock);})();</script>';
 }
 
 export function lockHalloweenBatScript(source = '') {

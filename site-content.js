@@ -798,7 +798,7 @@ function ensurePublicBrandMark() {
     if (brand.querySelector('img.brand-mark')) return;
     const mark = document.createElement('img');
     mark.className = 'brand-mark';
-    mark.src = '/assets/efhs-blue-regiment-mark.png?v=cms-p2-20261031zd';
+    mark.src = '/assets/efhs-blue-regiment-mark.png?v=cms-p2-20261031ze';
     mark.alt = 'East Forsyth Blue Regiment';
     mark.width = 48;
     mark.height = 48;
@@ -1654,7 +1654,7 @@ function safePublicThemePhotoUrl(url = '') {
 function applyPublicThemePhotos(photos = []) {
   if (!document.body?.classList.contains('efhs-theme')) return;
   // Keep the pinned Home Game Performance (4) hero; gallery matching must not replace it.
-  const homeHero = '/assets/efhs-home-hero.jpg?v=cms-p2-20261031zd';
+  const homeHero = '/assets/efhs-home-hero.jpg?v=cms-p2-20261031ze';
   const root = document.documentElement;
   root.style.setProperty('--efhs-hero-photo', `url("${homeHero}")`);
   const currentPage = String(getComputedStyle(root).getPropertyValue('--efhs-page-photo') || '').trim();
@@ -3787,7 +3787,8 @@ function mountHalloweenOverlay() {
   const web = halloweenWebPath(160);
   const style = document.createElement('style');
   style.textContent = `
-#efhs-halloween{position:fixed;inset:0 0 auto 0;height:0;z-index:99;pointer-events:none}
+#efhs-halloween{position:fixed;inset:0 0 auto 0;height:0;z-index:1000;pointer-events:none}
+#efhs-halloween *{pointer-events:none}
 #efhs-halloween svg{position:absolute;display:block;overflow:visible;background:none}
 #efhs-halloween .hw-web{top:0;width:var(--hw-web,160px);height:var(--hw-web,160px);opacity:.32}
 #efhs-halloween .hw-web path{fill:none;stroke:#dfe6ee;stroke-width:1;vector-effect:non-scaling-stroke}
@@ -3816,20 +3817,13 @@ function mountHalloweenOverlay() {
   // floats just under the header/marquee/notice strip instead of on the logo or icons.
   // Keep the bat clear of the logo and site name: park it in the empty header
   // space left of the brand when there is room, else just under the chrome.
+  // Trevor 2026-10-30: bat centered horizontally, layered over the header banner
+  // (pointer-events:none on the wrap, so taps reach the banner and menu underneath).
   const placeBat = () => {
-    const brand = document.querySelector('header.site-header .brand');
-    const r = brand?.getBoundingClientRect();
-    const half = window.innerWidth >= 768 ? 50 : 18;
-    const reach = half + 18 + 16; // half-width + drift + breathing room
-    if (r && r.width && r.left - reach >= half + 8) {
-      wrap.style.setProperty('--hw-bat-top', `${Math.round(r.top + r.height / 2 - half * 0.52)}px`);
-      wrap.style.setProperty('--hw-bat-left', `${Math.round(r.left - reach)}px`);
-      return;
-    }
-    const chrome = ['header.site-header', '.sponsor-marquee-section:not([hidden])', '[data-site-deadline-banners]']
-      .map((sel) => document.querySelector(sel)?.getBoundingClientRect().bottom || 0);
-    const bottom = Math.max(...chrome);
-    wrap.style.setProperty('--hw-bat-top', `${bottom > 0 && bottom < 320 ? Math.round(bottom + 10) : 70}px`);
+    const head = document.querySelector('header.site-header')?.getBoundingClientRect();
+    const half = window.innerWidth >= 768 ? 26 : 10;
+    const top = head && head.height ? Math.round(head.top + head.height / 2 - half) : 20;
+    wrap.style.setProperty('--hw-bat-top', `${Math.max(0, top)}px`);
     wrap.style.setProperty('--hw-bat-left', '50%');
   };
   window.addEventListener('resize', placeBat, { passive: true });
