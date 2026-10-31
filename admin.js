@@ -1137,7 +1137,7 @@ function structuredPageFields(page) {
 
 function pagePayload(form) {
   const payload = formPayload(form);
-  payload.nav_order = Number(payload.nav_order || 99);
+  payload.nav_order = Number(payload.nav_order === '' || payload.nav_order == null ? 1000 : payload.nav_order);
   // Disabled controls are omitted from FormData; keep home layout explicit.
   if (form?.elements?.layout?.disabled) payload.layout = form.elements.layout.value;
   return payload;
