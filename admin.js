@@ -1983,11 +1983,43 @@ function pageListEntries() {
       active: page.active !== false && page.active !== 0,
       editHref: visual ? visualEditorHref(slug) : settingsHref,
       settingsHref: siteAdmin ? settingsHref : '',
+      deletable: siteAdmin && !page.protected && !page.is_home,
+    };
+  });
+}
+
+async function deletePageToTrash(slug, label) {
+  const name = label || slug;
+  if (!window.confirm(`Delete the page "${name}"?\n\nIt will be removed from the menu, footer and site map, and its address will go to Home. You can restore it from Trash.`)) return;
+  try {
+    await jsonFetch(`/api/admin/pages/${encodeURIComponent(slug)}`, { method: 'DELETE' });
+    await refreshAll();
+  } catch (error) {
+    window.alert(`Could not delete "${name}": ${error.message}`);
+  }
+}
+
+async function renderPageTrash() {
+  const card = document.querySelector('[data-page-trash-card]');
+  const list = document.querySelector('[data-page-trash]');
+  if (!card || !list) return;
+  if (!canManageSitePages()) { card.hidden = true; return; }
+  let rows = [];
+  try { rows = await jsonFetch('/api/admin/pages-trash'); } catch { rows = []; }
+  card.hidden = !rows.length;
+  list.innerHTML = rows.map((r) => `<li class="page-list-row"><div class="page-list-main"><strong class="page-list-title">${escapeHtml(r.title || r.slug)}</strong><code class="page-list-slug">/${escapeHtml(r.slug)}</code><span class="page-list-chips"><span class="page-chip page-chip-off">Deleted ${escapeHtml(String(r.retired_at || '').slice(0, 10))}</span></span></div><div class="page-list-actions"><button class="btn outline small" type="button" data-page-restore="${escapeAttr(r.slug)}" data-page-label="${escapeAttr(r.title || r.slug)}">Restore</button></div></li>`).join('');
+  list.querySelectorAll('[data-page-restore]').forEach((button) => {
+    button.onclick = async () => {
+      const name = button.dataset.pageLabel;
+      if (!window.confirm(`Restore "${name}"? It comes back Hidden; turn on Active in its Page settings to publish it.`)) return;
+      try { await jsonFetch(`/api/admin/pages/${encodeURIComponent(button.dataset.pageRestore)}/restore`, { method: 'POST' }); await refreshAll(); }
+      catch (error) { window.alert(`Could not restore "${name}": ${error.message}`); }
     };
   });
 }
 
 function renderPageShortcuts() {
+  renderPageTrash();
   // 14d-1 removed the old sidebar list; pages now live on the Pages screen and in the Website flyout/sheet.
   const entries = pageListEntries();
   const siteAdmin = canManageSitePages();
@@ -2012,9 +2044,13 @@ function renderPageShortcuts() {
       const gear = e.settingsHref
         ? `<a class="page-list-gear admin-page-settings" href="${escapeAttr(e.settingsHref)}" data-page-settings="${slug}" aria-label="Page settings: ${escapeAttr(e.label)}" title="Page settings">${PAGE_GEAR_SVG}</a>`
         : '';
+      const del = e.deletable ? `<button class="btn outline small page-list-delete" type="button" data-page-delete="${slug}" data-page-label="${escapeAttr(e.label)}">Delete</button>` : '';
       const extra = e.slug === 'fundraising' ? '<a class="page-list-extra" href="/admin/fundraiser-cards">Fundraiser cards</a>' : '';
-      return `<li class="page-list-row" data-page-row="${slug}"><div class="page-list-main"><strong class="page-list-title">${escapeHtml(e.label)}</strong><code class="page-list-slug">/${escapeHtml(e.slug)}</code><span class="page-list-chips">${chips}</span>${extra}</div><div class="page-list-actions">${edit}${gear}</div></li>`;
+      return `<li class="page-list-row" data-page-row="${slug}"><div class="page-list-main"><strong class="page-list-title">${escapeHtml(e.label)}</strong><code class="page-list-slug">/${escapeHtml(e.slug)}</code><span class="page-list-chips">${chips}</span>${extra}</div><div class="page-list-actions">${edit}${gear}${del}</div></li>`;
     }).join('');
+    list.querySelectorAll('[data-page-delete]').forEach((button) => {
+      button.onclick = () => deletePageToTrash(button.dataset.pageDelete, button.dataset.pageLabel);
+    });
     list.querySelectorAll('[data-edit-shortcut]').forEach((button) => {
       button.onclick = () => editPage(button.dataset.editShortcut);
     });

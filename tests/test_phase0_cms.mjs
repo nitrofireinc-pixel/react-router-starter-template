@@ -752,3 +752,25 @@ test('Users-permission holder can save their own name and password through the U
   }), env, {});
   assert.equal(blocked.status, 403);
 });
+
+test('Delete page soft-deletes into Trash and protects core pages', async () => {
+  resetDbInitCache();
+  const env = createWorkerTestEnv({
+    pages: {
+      home: pageRow('home', { id: 1 }),
+      join: pageRow('join', { id: 2 }),
+      'old-trip': pageRow('old-trip', { id: 50 }),
+    },
+  });
+  const seen = [];
+  const prep = env.DB.prepare.bind(env.DB);
+  env.DB.prepare = (sql) => { seen.push(String(sql)); return prep(sql); };
+  const cookie = `efband_session=${await makeSession({ id: 1, username: 'admin' }, env)}`;
+  const del = (slug) => worker.fetch(new Request(`https://efhsband.org/api/admin/pages/${slug}`, { method: 'DELETE', headers: { cookie } }), env, {});
+  assert.equal((await del('home')).status, 400);
+  assert.equal((await del('join')).status, 400);
+  const ok = await del('old-trip');
+  assert.equal(ok.status, 200, await ok.clone().text());
+  assert.ok(seen.some((q) => /UPDATE cms_pages SET active = 0, retired_at = CURRENT_TIMESTAMP/.test(q)));
+  assert.ok(!seen.some((q) => /DELETE FROM cms_pages/.test(q)), 'must not hard-delete');
+});
