@@ -320,7 +320,7 @@
     render();
     try {
       const response = await fetch('/api/caldev/events', { headers: { Accept: 'application/json' } });
-      if (!response.ok) throw new Error('Could not load Schedule Board events');
+      if (!response.ok) throw new Error('Could not load calendar events');
       state.events = await response.json();
     } catch (error) {
       state.error = error?.message || 'Could not load events';
@@ -369,7 +369,6 @@
           </div>
         </div>
       </div>
-      <p class="caldev-hint">View only on the public site. Super Admins edit this board in the CMS Schedule Board tab. Meetings also appear on Boosters.</p>
     `;
   }
 
