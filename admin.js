@@ -1726,7 +1726,7 @@ function canOpenAdminTab(name) {
   if (tab === 'contact') return canEditContact();
   if (tab === 'site' || tab === 'social') return hasPermission('site');
   if (tab === 'users') return hasPermission('users');
-  if (tab === 'security-log') return isSuperAdmin();
+  if (tab === 'security-log') return isSuperAdmin() || isSiteAdminUser();
   if (tab === 'forms') return canAccessForms();
   if (tab === 'caldev') return canAccessScheduleBoard();
   if (tab === 'photos') return hasPermission('photos');
@@ -2135,7 +2135,7 @@ function showAllowedPanels() {
     site: hasPermission('site'),
     social: hasPermission('site'),
     users: hasPermission('users'),
-    'security-log': isSuperAdmin(),
+    'security-log': isSuperAdmin() || isSiteAdminUser(),
     forms: canAccessForms(),
     caldev: canAccessScheduleBoard(),
     events: canViewEvents(),
@@ -4289,6 +4289,10 @@ async function loadSecurityLog({ resetPage = false } = {}) {
   const downloadJson = document.querySelector('#download-security-log-json');
   const pager = document.querySelector('#security-log-pager');
   if (!list) return;
+  // Admin (site_admin) is view-only; exports, verify and new-log stay Super Admin only (the server enforces this too).
+  const viewOnly = !isSuperAdmin();
+  ['#download-security-log', '#download-security-log-csv', '#download-security-log-json', '#verify-security-log'].forEach((sel) => { const el = document.querySelector(sel); if (el) { el.hidden = viewOnly; el.style.display = viewOnly ? 'none' : ''; } });
+  const genesis = document.querySelector('.security-log-genesis'); if (genesis) genesis.hidden = viewOnly;
   if (resetPage) state.securityLogPage = 1;
   const pageSize = Math.max(1, Number(state.securityLogPageSize) || 25);
   const page = Math.max(1, Number(state.securityLogPage) || 1);

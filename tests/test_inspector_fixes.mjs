@@ -17,3 +17,11 @@ test('publish clears stale save timer; mobile top bar short pill', () => {
   assert.match(s, /saveTimer = 0/); assert.match(s, /st-pill-short/);
   assert.match(c, /\.st-pill-full\{display:none\}\.st-pill-short\{display:inline\}/);
 });
+import * as W from '../worker/src/worker.mjs';
+test('Security Log: Super Admin full, Admin view-only, nobody else', () => {
+  const sa = { role: 'admin' }, ad = { role: 'site_admin' }, ed = { role: 'editor', permissions: '["all","security-log"]' };
+  assert.equal(W.canAccessSecurityLog(sa), true); assert.equal(W.canManageSecurityLog(sa), true);
+  assert.equal(W.canAccessSecurityLog(ad), true); assert.equal(W.canManageSecurityLog(ad), false);
+  assert.equal(W.canAccessSecurityLog(ed), false); assert.equal(W.hasPermission(ed, 'security-log'), false);
+  assert.equal((w.match(/requireSecurityLogAccess\(request, env, \{ manage: true/g) || []).length, 7);
+});

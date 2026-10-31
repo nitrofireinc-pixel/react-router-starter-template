@@ -611,7 +611,7 @@ const GLOBAL_PERMISSIONS = ['site', 'pages', 'sponsors', 'treasurer', 'president
 export const LEDGER_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues', 'expense'];
 export const LEDGER_INCOME_KINDS = ['sponsor', 'donor', 'fundraiser', 'dues'];
 export const PAYMENT_LEDGER_XML_KEY = 'payment_ledger_xml';
-export const ASSET_VERSION = 'cms-p2-20261031zm';
+export const ASSET_VERSION = 'cms-p2-20261031zn';
 // Admin-only assets (Studio home). Bumping this never changes public page bytes.
 export const ADMIN_HOME_VERSION = `${ASSET_VERSION}-home5`;
 /** Admin-only cache key for the 14c sidebar + launcher (public pages keep ASSET_VERSION). */
@@ -921,7 +921,12 @@ export function assertSafeSelfPrivilegeEdit(actor, targetId, payload = {}, exist
 }
 
 /** Security log is Super Admin only — never grantable via permissions. */
+/** Security Log: Super Admin = full (view, export, verify, start new log); Admin (site_admin) = view only. No other role, ever; permissions cannot grant it. */
 export function canAccessSecurityLog(user) {
+  return isSuperAdmin(user) || isSiteAdminRole(user);
+}
+
+export function canManageSecurityLog(user) {
   return isSuperAdmin(user);
 }
 
@@ -9085,7 +9090,7 @@ export async function requireScheduleBoardAccess(request, env) {
   return auth;
 }
 
-export async function requireSecurityLogAccess(request, env, { expiredDetail = '' } = {}) {
+export async function requireSecurityLogAccess(request, env, { expiredDetail = '', manage = false } = {}) {
   const session = await inspectSessionCookie(request, env);
   if (session.d1Error) {
     return {
@@ -9098,7 +9103,10 @@ export async function requireSecurityLogAccess(request, env, { expiredDetail = '
   }
   if (!session.user) return { response: jsonResponse({ detail: 'Login required' }, 401) };
   if (!canAccessSecurityLog(session.user)) {
-    return { response: jsonResponse({ detail: 'Security log is Super Admin only' }, 403), user: session.user };
+    return { response: jsonResponse({ detail: 'Security log is Super Admin and Admin only' }, 403), user: session.user };
+  }
+  if (manage && !canManageSecurityLog(session.user)) {
+    return { response: jsonResponse({ detail: 'Admin has view-only access to the Security Log. Exports, verify and new logs are Super Admin only.', mode: 'view_only' }, 403), user: session.user };
   }
   return { user: session.user, session };
 }
@@ -11232,7 +11240,7 @@ async function routeApi(request, env, url, ctx = null) {
     return new Response(guideAsset.body, { status: 200, headers });
   }
   if ((url.pathname === '/api/admin/security-log.pdf' || url.pathname === '/api/admin/security-log.txt') && request.method === 'GET') {
-    const auth = await requireSecurityLogAccess(request, env, { expiredDetail: 'Export session expired, start again' });
+    const auth = await requireSecurityLogAccess(request, env, { manage: true, expiredDetail: 'Export session expired, start again' });
     if (auth.response) return auth.response;
     const format = url.pathname.endsWith('.txt') ? 'txt' : 'pdf';
     const payload = await listAdminAuditLogs(env, {
@@ -11296,7 +11304,7 @@ async function routeApi(request, env, url, ctx = null) {
     });
   }
   if ((url.pathname === '/api/admin/security-log.csv' || url.pathname === '/api/admin/security-log.json') && request.method === 'GET') {
-    const auth = await requireSecurityLogAccess(request, env, { expiredDetail: 'Export session expired, start again' });
+    const auth = await requireSecurityLogAccess(request, env, { manage: true, expiredDetail: 'Export session expired, start again' });
     if (auth.response) return auth.response;
     const range = {
       limit: Math.min(Number(url.searchParams.get('limit') || 2000), 2000),
@@ -11426,7 +11434,7 @@ async function routeApi(request, env, url, ctx = null) {
     });
   }
   if (url.pathname === '/api/admin/security-log/export/start' && request.method === 'POST') {
-    const auth = await requireSecurityLogAccess(request, env, { expiredDetail: 'Export session expired, start again' });
+    const auth = await requireSecurityLogAccess(request, env, { manage: true, expiredDetail: 'Export session expired, start again' });
     if (auth.response) return auth.response;
     const body = await request.json().catch(() => ({}));
     const format = String(body.format || 'csv').toLowerCase() === 'json' ? 'json' : 'csv';
@@ -11473,7 +11481,7 @@ async function routeApi(request, env, url, ctx = null) {
     });
   }
   if (url.pathname === '/api/admin/security-log/export/complete' && request.method === 'POST') {
-    const auth = await requireSecurityLogAccess(request, env, { expiredDetail: 'Export session expired, start again' });
+    const auth = await requireSecurityLogAccess(request, env, { manage: true, expiredDetail: 'Export session expired, start again' });
     if (auth.response) return auth.response;
     const body = await request.json().catch(() => ({}));
     const completed = await completeAuditExportSession(env, body.session_id || '', {
@@ -11516,7 +11524,7 @@ async function routeApi(request, env, url, ctx = null) {
     });
   }
   if (url.pathname === '/api/admin/security-log/verify' && request.method === 'GET') {
-    const auth = await requireSecurityLogAccess(request, env);
+    const auth = await requireSecurityLogAccess(request, env, { manage: true });
     if (auth.response) return auth.response;
     const verify = await verifyAdminAuditBatch(env, {
       after_id: Number(url.searchParams.get('after_id') || 0),
@@ -11554,7 +11562,7 @@ async function routeApi(request, env, url, ctx = null) {
     return jsonResponse(verify);
   }
   if (url.pathname === '/api/admin/security-log/verify/complete' && request.method === 'POST') {
-    const auth = await requireSecurityLogAccess(request, env);
+    const auth = await requireSecurityLogAccess(request, env, { manage: true });
     if (auth.response) return auth.response;
     await request.json().catch(() => ({}));
     const walked = await verifyAdminAuditRange(env, {});
@@ -11603,7 +11611,7 @@ async function routeApi(request, env, url, ctx = null) {
     });
   }
   if (url.pathname === '/api/admin/security-log/genesis' && request.method === 'POST') {
-    const auth = await requireSecurityLogAccess(request, env);
+    const auth = await requireSecurityLogAccess(request, env, { manage: true });
     if (auth.response) return auth.response;
     const payload = await request.json().catch(() => ({}));
     const confirm = String(payload.confirm || '').trim();
@@ -16627,7 +16635,7 @@ __ADMIN_SIDEBAR__
 </form>
 </div>
 </section>
-<section id="tab-caldev" class="cms-panel" hidden><div class="panel-head"><div><p class="kicker">Program</p><h1>Schedule Board</h1><p>Add and edit events for the public Calendar. Single-click selects, double-click opens the Create/Edit toast, drag (or press-and-hold then drag on mobile) reschedules. Day <b>+</b> adds an event. Events with What set to <b>Meetings</b> also appear on the Boosters page. Public calendar is <code>/calendar.html</code>.</p><p><a class="btn outline" href="/admin/events-manager">📅 Open the full-page event manager</a></p></div><div class="panel-actions"><button class="btn primary" type="button" id="caldev-finished-top">Finished</button></div></div><div id="cms-caldev-board" class="cms-caldev-mount" aria-live="polite"></div></section><section id="tab-security-log" class="cms-panel security-log-panel" hidden><div class="panel-head"><div><p class="kicker">Security</p><h1>Security Audit Log</h1><p>Super Admin only — view and print. Month/year defaults to the current Eastern month. 25 entries per page, newest first. Download PDF for the selected month. This log cannot be edited or deleted, and access cannot be granted to other users.</p></div><div class="panel-actions"><a class="btn outline" id="download-security-log" href="/api/admin/security-log.pdf">Download month PDF</a><a class="btn outline" id="download-security-log-csv" href="/api/admin/security-log.csv">Download CSV</a><a class="btn outline" id="download-security-log-json" href="/api/admin/security-log.json">Download JSON</a><button class="btn outline" type="button" id="verify-security-log">Verify integrity</button><button class="btn outline" type="button" id="refresh-security-log">Refresh</button></div></div>
+<section id="tab-caldev" class="cms-panel" hidden><div class="panel-head"><div><p class="kicker">Program</p><h1>Schedule Board</h1><p>Add and edit events for the public Calendar. Single-click selects, double-click opens the Create/Edit toast, drag (or press-and-hold then drag on mobile) reschedules. Day <b>+</b> adds an event. Events with What set to <b>Meetings</b> also appear on the Boosters page. Public calendar is <code>/calendar.html</code>.</p><p><a class="btn outline" href="/admin/events-manager">📅 Open the full-page event manager</a></p></div><div class="panel-actions"><button class="btn primary" type="button" id="caldev-finished-top">Finished</button></div></div><div id="cms-caldev-board" class="cms-caldev-mount" aria-live="polite"></div></section><section id="tab-security-log" class="cms-panel security-log-panel" hidden><div class="panel-head"><div><p class="kicker">Security</p><h1>Security Audit Log</h1><p>Super Admin: full access. Admin: view only. Month/year defaults to the current Eastern month. 25 entries per page, newest first. Download PDF for the selected month. This log cannot be edited or deleted, and access cannot be granted to other users.</p></div><div class="panel-actions"><a class="btn outline" id="download-security-log" href="/api/admin/security-log.pdf">Download month PDF</a><a class="btn outline" id="download-security-log-csv" href="/api/admin/security-log.csv">Download CSV</a><a class="btn outline" id="download-security-log-json" href="/api/admin/security-log.json">Download JSON</a><button class="btn outline" type="button" id="verify-security-log">Verify integrity</button><button class="btn outline" type="button" id="refresh-security-log">Refresh</button></div></div>
 <div id="security-log-court" class="security-log-court" hidden></div>
 <div class="admin-card security-log-filters">
   <div class="form-grid security-log-filter-grid">
