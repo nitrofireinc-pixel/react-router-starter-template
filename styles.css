@@ -5316,6 +5316,8 @@ body.maintenance-preview{padding-top:var(--maintenance-banner-h)}
 .calendar-day-toast-event .event-description p:first-child,
 .calendar-day-toast-event .event-description div:first-child{margin-top:6px}
 .calendar-day-toast .draft{color:rgba(255,255,255,.75)}
+.calendar-day-toast-panel .calendar-day-toast-close{top:8px;right:8px;width:44px;height:44px;min-width:44px;min-height:44px;display:grid;place-items:center;padding:0;font-size:1.6rem;background:rgba(255,255,255,.22);border:1px solid rgba(255,255,255,.45);z-index:3}
+.calendar-day-toast-panel .calendar-day-toast-close:hover,.calendar-day-toast-panel .calendar-day-toast-close:focus-visible{background:rgba(255,255,255,.34);outline:2px solid #fff;outline-offset:2px}
 @media(max-width:700px){
   .month-calendar-shell{padding:14px}
   .month-calendar-weekdays,

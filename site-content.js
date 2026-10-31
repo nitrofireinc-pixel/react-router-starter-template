@@ -798,7 +798,7 @@ function ensurePublicBrandMark() {
     if (brand.querySelector('img.brand-mark')) return;
     const mark = document.createElement('img');
     mark.className = 'brand-mark';
-    mark.src = '/assets/efhs-blue-regiment-mark.png?v=cms-p2-20261031zc';
+    mark.src = '/assets/efhs-blue-regiment-mark.png?v=cms-p2-20261031zd';
     mark.alt = 'East Forsyth Blue Regiment';
     mark.width = 48;
     mark.height = 48;
@@ -1212,7 +1212,7 @@ function ensureCalendarDayToast() {
   root.innerHTML = `
     <div class="calendar-day-toast-backdrop" aria-hidden="true"></div>
     <div class="calendar-day-toast-panel">
-      <button type="button" class="sponsor-flyin-close calendar-day-toast-close" data-calendar-day-close aria-label="Close day events">×</button>
+      <button type="button" class="sponsor-flyin-close calendar-day-toast-close" data-calendar-day-close aria-label="Close event details" title="Close">×</button>
       <div class="calendar-day-toast-card">
         <h3 id="calendar-day-toast-title"></h3>
         <div class="calendar-day-toast-list" data-calendar-day-list></div>
@@ -1220,6 +1220,11 @@ function ensureCalendarDayToast() {
     </div>`;
   document.body.appendChild(root);
   root.querySelector('[data-calendar-day-close]')?.addEventListener('click', () => hideCalendarDayToast());
+  root.querySelector('.calendar-day-toast-backdrop')?.addEventListener('click', () => hideCalendarDayToast());
+  root.addEventListener('click', (event) => { if (event.target === root) hideCalendarDayToast(); });
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && !root.hidden) hideCalendarDayToast();
+  });
   return root;
 }
 
@@ -1649,7 +1654,7 @@ function safePublicThemePhotoUrl(url = '') {
 function applyPublicThemePhotos(photos = []) {
   if (!document.body?.classList.contains('efhs-theme')) return;
   // Keep the pinned Home Game Performance (4) hero; gallery matching must not replace it.
-  const homeHero = '/assets/efhs-home-hero.jpg?v=cms-p2-20261031zc';
+  const homeHero = '/assets/efhs-home-hero.jpg?v=cms-p2-20261031zd';
   const root = document.documentElement;
   root.style.setProperty('--efhs-hero-photo', `url("${homeHero}")`);
   const currentPage = String(getComputedStyle(root).getPropertyValue('--efhs-page-photo') || '').trim();
