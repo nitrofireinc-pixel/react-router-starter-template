@@ -297,7 +297,7 @@ table.t td:first-child { color: #0f1f36; }
 <ul>
 <li>A daily job at <b>7:20 AM Eastern</b> (<code>20 11 * * *</code> UTC) looks at upcoming Schedule Board events about fundraisers (title or description mentions fundraiser/fundraising, mattress, or auction). New matches become drafts. Approvers get email subject <b>Fundraiser draft needs approval:</b> plus the title. The link opens the CMS — it is not a one-click approve.</li>
 <li>Rejected events are <b>not</b> drafted again unless the calendar date changes. Then a new draft is created and the email says why. Rejected cards sit under <b>Rejected</b>.</li>
-<li>If an already-approved card’s linked calendar event changes date, time, or location, the card stays as-is and shows a <b>Calendar changed</b> flag. Approvers get <b>Fundraiser calendar changed:</b> plus the title.</li>
+<li>Every card is linked to a calendar event and always shows that event’s current date, time, and location. If the event changes, approvers still get <b>Fundraiser calendar changed:</b> plus the title.</li>
 <li>Only <b>Approve</b>d cards appear on Home and the Fundraising page. Hidden and rejected cards do not.</li>
 <li>The Security Log records <code>fundraiser.card.create</code>, <code>.edit</code>, <code>.reorder</code>, <code>.approve</code>, <code>.reject</code>, <code>.restore</code>, <code>.hide</code>, <code>.delete</code>, and <code>fundraiser.draft.auto</code>.</li>
 </ul>
