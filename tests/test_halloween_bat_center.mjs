@@ -17,3 +17,8 @@ test('worker bat lock centers the bat over the header banner, above it, tap-thro
   assert.match(halloweenBatHeaderStyle(), /z-index:60!important;pointer-events:none!important/);
   assert.match(halloweenBatHeaderStyle(), /#efhs-halloween \*\{pointer-events:none!important\}/);
 });
+test('bat glows on the dark banner and steps off the brand text', () => {
+  assert.match(halloweenBatHeaderStyle(), /\.hw-bat\{[^}]*filter:drop-shadow\([^}]*#f5c542/);
+  assert.match(halloweenBatLockScript(), /\.brand,#site-nav a,#site-nav button,\.menu-button/);
+  assert.match(halloweenBatLockScript(), /c\.push\(r\.top-h\.top-bh-2,r\.bottom-h\.top\+2\)/);
+});
