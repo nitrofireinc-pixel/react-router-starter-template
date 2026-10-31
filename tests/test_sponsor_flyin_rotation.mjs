@@ -22,7 +22,7 @@ const S = { id: 2, name: 'Silver Co', level: 'Silver Sponsor', active: 1 };
 const B = { id: 3, name: 'Aire Serv', level: 'Bronze Sponsor', active: 1 };
 const H = { id: 4, name: 'Dominos', level: 'Honorable Mention', active: 1 };
 
-test('asset version', () => assert.equal(ASSET_VERSION, 'cms-p2-20261031r'));
+test('asset version', () => assert.equal(ASSET_VERSION, 'cms-p2-20261031t'));
 
 test('weights 2:1 give G S G', () => {
   assert.deepEqual([...buildSponsorFlyinRotation([G], [S], { gold: 2, silver: 1 }).map((s) => s.id)], [1, 2, 1]);
@@ -60,4 +60,29 @@ test('footer carries the independent-nonprofit disclaimer once', async () => {
   const w = readFileSync(new URL('../worker/src/worker.mjs', import.meta.url), 'utf8');
   const line = 'East Forsyth Band Boosters is an independent 501(c)(3) nonprofit organization and is not affiliated with or endorsed by East Forsyth High School or Winston-Salem/Forsyth County Schools.';
   assert.equal(w.split(`<p class="footer-disclaimer">${line}</p></footer>`).length, 2);
+});
+
+test('sponsor popup dismissal lasts one visit, legacy flag no longer silences returning browsers', () => {
+  const block = src.slice(src.indexOf("const SPONSOR_POPUP_DISMISSED_KEY"), src.indexOf('const SPONSOR_TAP_SHIELD_MS'));
+  const mem = new Map();
+  const sessionStorage = { getItem: (k) => mem.get(k) ?? null, setItem: (k, v) => mem.set(k, String(v)), removeItem: (k) => mem.delete(k) };
+  let now = 1_000_000_000;
+  const c = vm.createContext({ sessionStorage, Date: { now: () => now }, JSON, Number });
+  vm.runInContext(`${block}\nthis.api={sponsorPopupDismissedForSession,rememberSponsorPopupDismissed};`, c);
+  const { sponsorPopupDismissedForSession: dismissed, rememberSponsorPopupDismissed: remember } = c.api;
+  mem.set('efhs-sponsor-popup-dismissed-v1', '1');
+  assert.equal(dismissed(), false, 'legacy flag ignored');
+  assert.equal(mem.has('efhs-sponsor-popup-dismissed-v1'), false);
+  remember();
+  now += 10 * 60 * 1000; assert.equal(dismissed(), true, 'same visit stays quiet');
+  now += 25 * 60 * 1000; assert.equal(dismissed(), true, 'activity extends the visit');
+  now += 31 * 60 * 1000; assert.equal(dismissed(), false, 'new visit shows it again');
+});
+
+test('sponsor popup swallows presses and raises a tap shield above the News tab', () => {
+  assert.match(src, /root\.addEventListener\(type,[\s\S]{0,400}capture: true/);
+  assert.match(src, /raiseSponsorTapShield\(SPONSOR_FLYIN_FADE_MS \+ SPONSOR_TAP_SHIELD_MS\)/);
+  const css = readFileSync(new URL('../styles.css', import.meta.url), 'utf8');
+  assert.match(css, /\.sponsor-flyin\{z-index:2147482000\}/);
+  assert.match(css, /\.sponsor-flyin-shield\{position:fixed;inset:0;z-index:2147483000/);
 });
