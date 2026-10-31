@@ -2751,15 +2751,6 @@ async function renderStudioHome() {
     const admin = t.admin ? '<span class="sh-badge sh-badge-admin">Admin</span>' : '';
     return `<a class="sh-tile${t.feature ? ' sh-tile-feature' : ''}" href="${escapeAttr(t.href)}" data-sh-tile="${escapeAttr(t.key)}">${badge || admin}${badge && admin ? admin : ''}<span class="sh-ico" aria-hidden="true">${escapeHtml(t.icon)}</span><b>${escapeHtml(t.title)}</b><small>${escapeHtml(t.copy)}</small></a>`;
   }).join('');
-  const draftsBox = document.querySelector('#sh-drafts');
-  const draftsList = document.querySelector('#sh-drafts-list');
-  if (draftsBox && draftsList) {
-    const drafts = data.drafts || [];
-    draftsBox.hidden = !(data.tiles || []).some((t) => t.key === 'pages');
-    draftsList.innerHTML = drafts.length
-      ? drafts.map((d) => `<li><span class="sh-dot" aria-hidden="true"></span><span>${escapeHtml(d.title)} — draft${d.by ? ` by ${escapeHtml(d.by)}` : ''}</span><a href="${escapeAttr(d.href)}">Review →</a></li>`).join('')
-      : '<li class="sh-muted">No drafts waiting. Everything is published.</li>';
-  }
   const coming = document.querySelector('#sh-coming-list');
   if (coming) {
     const ev = data.upcoming || [];

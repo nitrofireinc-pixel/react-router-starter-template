@@ -20,7 +20,7 @@
 .sh-tile .sh-badge + .sh-badge{top:32px}
 .sh-panels{display:grid;grid-template-columns:minmax(0,2.2fr) minmax(0,1fr);gap:16px;margin-top:18px}
 .sh-panel{background:#fff;border:1px solid #e1e8f1;border-radius:14px;padding:16px 18px;box-shadow:0 8px 24px rgba(15,34,58,.07)}
-.sh-panel[hidden]{display:none}.sh-panels:has(#sh-drafts[hidden]){grid-template-columns:1fr}
+.sh-panel[hidden]{display:none}.sh-panels{grid-template-columns:1fr}
 .sh-panel h2{margin:0 0 10px;font-family:Oswald,"Work Sans",sans-serif;font-size:1.05rem;color:var(--sh-navy)}
 .sh-panel ul{list-style:none;margin:0;padding:0}
 .sh-panel li{display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid #eef2f7;font-size:.86rem;color:#10233c}
